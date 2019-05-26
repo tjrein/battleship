@@ -18,9 +18,9 @@ server.listen(9000, function() {
 
 server.on('connection', handleConnection);
 
-function executeCommand(command, parameters, conn) {
+function executeCommand(command, parameters, conn, state) {
   if (commands.includes(command)) {
-    myEmitter.emit(command, parameters, conn)
+    myEmitter.emit(command, parameters, conn, state)
   } else {
     console.log("COMMAND NOT FOUND")
   }
@@ -36,11 +36,13 @@ function parseMessage(message) {
 
 function handleConnection(conn) {
   var remoteAddress = conn.remoteAddress + ':' + conn.remotePort;
-  console.log('new client connection from %s', remoteAddress);
+  let current_state = 'connected';
 
   conn.on('data', onConnData);
   conn.once('close', onConnClose);
   conn.on('error', onConnError);
+
+  conn_wrapper = {socket: conn, state: 'connected'}
 
   function onConnData(data) {
     console.log('connection data from %s: %j', remoteAddress, data);
@@ -48,7 +50,7 @@ function handleConnection(conn) {
 
     for (let i = 0; i < messages.length; i++) {
       let {command, params} = parseMessage(messages[i])
-      executeCommand(command, params, conn)
+      executeCommand(command, params, conn_wrapper)
     }
   }
 
@@ -70,20 +72,19 @@ function broadcast(instance, params, sender) {
 }
 
 function cleanupInstance(instance_name) {
+  //If no clients are in an instance, delete it
   if (game_instances[instance_name].length === 0) {
     delete game_instances[instance_name]
   }
 }
 
-myEmitter.on('GQUIT', function(params, conn) {
+myEmitter.on('GQUIT', function(params, conn_wrapper) {
   let instance_name;
   [instance_name] = params;
 
   game_instance = game_instances[instance_name]
 
-  console.log("LENGTH OF GAME INSTANCE", game_instance.length)
-
-  index = game_instance.indexOf(conn)
+  index = game_instance.indexOf(conn_wrapper.socket)
 
   if (index > -1) {
     game_instance.splice(index, 1);
@@ -93,14 +94,14 @@ myEmitter.on('GQUIT', function(params, conn) {
 
 });
 
-myEmitter.on('PLACE', function(params, conn) {
+myEmitter.on('PLACE', function(params, conn, state) {
   let instance_name, ship, loc, orient;
   [instance_name, ship, loc, orient] = params;
   instance = game_instances[instance_name]
   broadcast(instance, [ship, loc, orient], conn)
 });
 
-myEmitter.on('JOIN', function(params, conn) {
+myEmitter.on('JOIN', function(params, conn, state) {
   console.log("Server: JOIN");
 
   if (params.length > 1) {
@@ -121,8 +122,9 @@ myEmitter.on('JOIN', function(params, conn) {
 
 });
 
-myEmitter.on('CREATE', function(params, conn) {
-  console.log("Server: CREATE");
+myEmitter.on('CREATE', function(params, conn_wrapper) {
+  console.log("Server: Create");
+  console.log("Current state", conn_wrapper.state);
 
   if (params.length > 1) {
     //TODO SEND ERROR
@@ -137,12 +139,12 @@ myEmitter.on('CREATE', function(params, conn) {
     return
   }
 
-  game_instances[name] = [conn]
-  conn.write("OK CREATE")
-
+  game_instances[name] = [conn_wrapper.socket]
+  conn_wrapper.socket.write("OK CREATE")
+  conn_wrapper.state = 'waiting';
 });
 
-myEmitter.on('QUIT', function(params, conn) {
+myEmitter.on('QUIT', function(params, conn, state) {
   console.log("Server: QUIT");
   conn.destroy()
 });
