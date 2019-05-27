@@ -1,13 +1,12 @@
 const EventEmitter = require('events');
-const utf8 = require('utf8')
-var net = require('net');
-var server = net.createServer();
+const net = require('net');
+const server = net.createServer();
 
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
 
-const commands = ['QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER"]
-const states = ['auth_user', 'auth_password', 'connected', 'waiting', 'init_game']
+const commands = ['QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS"];
+const states = ['auth_user', 'auth_password', 'connected', 'waiting', 'init_game', 'confirm', 'play_game'];
 
 let current_state = 'connected'
 let game_instances = {}
@@ -36,13 +35,11 @@ function parseMessage(message) {
 
 function handleConnection(conn) {
   var remoteAddress = conn.remoteAddress + ':' + conn.remotePort;
-  let current_state = 'connected';
-
   conn.on('data', onConnData);
   conn.once('close', onConnClose);
   conn.on('error', onConnError);
 
-  conn_wrapper = {socket: conn, state: 'connected'}
+  let conn_wrapper = {socket: conn, state: 'connected'}
 
   function onConnData(data) {
     console.log('connection data from %s: %j', remoteAddress, data);
@@ -83,25 +80,60 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
   [instance_name] = params;
 
   game_instance = game_instances[instance_name]
-
-  index = game_instance.indexOf(conn_wrapper.socket)
+  index = game_instance.indexOf(conn_wrapper)
 
   if (index > -1) {
     game_instance.splice(index, 1);
+    conn_wrapper.state = 'connected';
   }
 
   cleanupInstance(instance_name)
-
 });
 
-myEmitter.on('PLACE', function(params, conn, state) {
+myEmitter.on('PLACE', function(params, conn_wrapper) {
   let instance_name, ship, loc, orient;
   [instance_name, ship, loc, orient] = params;
-  instance = game_instances[instance_name]
-  broadcast(instance, [ship, loc, orient], conn)
+  instance = game_instances[instance_name];
+  //broadcast(instance, [ship, loc, orient], conn)
+
+  instance.forEach(function (wrapper) {
+    if (wrapper === conn_wrapper) return;
+    var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+    wrapper.socket.write("OK " + remoteAddress);
+  });
 });
 
-myEmitter.on('JOIN', function(params, conn, state) {
+myEmitter.on('GUESS', function(params, conn_wrapper) {
+  console.log("LETS SEE STATE", conn_wrapper.state);
+});
+
+myEmitter.on('CONFIRM', function(params, conn_wrapper) {
+  let name;
+  let confirm_count = 0;
+  [name] = params;
+  instance = game_instances[name];
+
+  if (instance) {
+    conn_wrapper.socket.write("OK CONFIRM");
+    conn_wrapper.state = 'confirm';
+
+    instance.forEach(function (wrapper) {
+      if (wrapper.state === 'confirm') {
+        confirm_count += 1;
+      }
+    });
+
+    if (confirm_count === 2) {
+      instance.forEach(function (wrapper) {
+        wrapper.state = 'play_game';
+      });
+    }
+  } else {
+    console.log("Game does not exist");
+  }
+});
+
+myEmitter.on('JOIN', function(params, conn_wrapper) {
   console.log("Server: JOIN");
 
   if (params.length > 1) {
@@ -113,11 +145,12 @@ myEmitter.on('JOIN', function(params, conn, state) {
   name = params[0]
 
   if (game_instances[name]) {
-    game_instances[name].push(conn)
-    conn.write("OK JOIN")
+    conn_wrapper.socket.write("OK JOIN");
+    conn_wrapper.state = 'init_game';
+    game_instances[name].push(conn_wrapper);
+    game_instances[name].forEach(function(wrapper) { wrapper.state = 'init_game'; });
   } else {
-    console.log("GAME does not exist")
-    return
+    console.log("Game does not exist");
   }
 
 });
@@ -139,12 +172,12 @@ myEmitter.on('CREATE', function(params, conn_wrapper) {
     return
   }
 
-  game_instances[name] = [conn_wrapper.socket]
+  game_instances[name] = [conn_wrapper]
   conn_wrapper.socket.write("OK CREATE")
   conn_wrapper.state = 'waiting';
 });
 
-myEmitter.on('QUIT', function(params, conn, state) {
+myEmitter.on('QUIT', function(params, conn_wrapper) {
   console.log("Server: QUIT");
-  conn.destroy()
+  conn_wrapper.socket.destroy()
 });
