@@ -17,9 +17,9 @@ server.listen(9000, function() {
 
 server.on('connection', handleConnection);
 
-function executeCommand(command, parameters, conn, state) {
+function executeCommand(command, parameters, conn_wrapper) {
   if (commands.includes(command)) {
-    myEmitter.emit(command, parameters, conn, state)
+    myEmitter.emit(command, parameters, conn_wrapper)
   } else {
     console.log("COMMAND NOT FOUND")
   }
@@ -39,11 +39,15 @@ function handleConnection(conn) {
   conn.once('close', onConnClose);
   conn.on('error', onConnError);
 
+  console.log("Client connected: ", remoteAddress);
+
   let conn_wrapper = {socket: conn, state: 'connected'}
 
   function onConnData(data) {
     console.log('connection data from %s: %j', remoteAddress, data);
-    messages = data.toString('UTF8').trim().split('\n')
+    messages = data.toString('UTF8').trim().split('\n');
+
+    console.log("MESSAGES", messages);
 
     for (let i = 0; i < messages.length; i++) {
       let {command, params} = parseMessage(messages[i])
