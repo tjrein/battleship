@@ -75,6 +75,7 @@ function broadcast(instance, params, sender) {
 function cleanupInstance(instance_name) {
   //If no clients are in an instance, delete it
   if (game_instances[instance_name].length === 0) {
+    console.log("Removing Game Instance: ", instance_name);
     delete game_instances[instance_name]
   }
 }
@@ -83,16 +84,22 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
   let instance_name;
   [instance_name] = params;
 
-  console.log("game_instances", game_instances)
 
-
-
-  game_instance = game_instances[instance_name]
-  index = game_instance.indexOf(conn_wrapper)
+  let game_instance = game_instances[instance_name]
+  let index = game_instance.indexOf(conn_wrapper)
 
   if (index > -1) {
     game_instance.splice(index, 1);
+    conn_wrapper.socket.write("OK GQUIT " + instance_name);
     conn_wrapper.state = 'connected';
+
+    if (game_instance.length) {
+      let other_player = game_instance[0];
+      let remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+
+      other_player.socket.write("OPP_LEFT " + remoteAddress);
+      other_player.state = 'waiting';
+    }
   }
 
   cleanupInstance(instance_name)
@@ -154,10 +161,20 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
   name = params[0]
 
   if (game_instances[name]) {
-    conn_wrapper.socket.write("OK JOIN");
+    conn_wrapper.socket.write("OK JOIN " + name + '\n');
     conn_wrapper.state = 'init_game';
     game_instances[name].push(conn_wrapper);
-    game_instances[name].forEach(function(wrapper) { wrapper.state = 'init_game'; });
+
+    game_instances[name].forEach(wrapper => {
+      wrapper.state = 'init_game';
+
+      //let other player know the game has been joined
+      if (wrapper !== conn_wrapper) {
+        var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+        wrapper.socket.write("OPP_JOINED " + remoteAddress);
+      }
+    });
+
   } else {
     console.log("Game does not exist");
     conn_wrapper.socket.write("ERR JOIN");
