@@ -83,6 +83,10 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
   let instance_name;
   [instance_name] = params;
 
+  console.log("game_instances", game_instances)
+
+
+
   game_instance = game_instances[instance_name]
   index = game_instance.indexOf(conn_wrapper)
 
