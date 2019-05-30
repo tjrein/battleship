@@ -2,10 +2,9 @@ const net = require('net');
 const EventEmitter = require('events');
 var keypress = require('keypress');
 
-let buffered = '';
 let message = '';
 
-let current_state = 'disconnected';
+//let current_state = 'disconnected';
 
 const commands = ['OK', 'ERR']
 
@@ -19,6 +18,9 @@ const inputs_for_state = {
   'connected': {
     '1': {'command': 'CREATE', 'parameters': ['name']},
     '2': {'command': 'JOIN', 'parameters': ['name']},
+  },
+  'waiting': {
+    '1': {'command': 'GQUIT', 'parameters': [] }
   }
 }
 
@@ -27,18 +29,19 @@ const readline = require('readline').createInterface({
   output: process.stdout
 });
 
-function welcome() {
-  console.log("==========BATTLESHIP========");
-  console.log("Available Options (enter number to execute)");
-  console.log("1) Create Game");
-  console.log("2) Join Game");
+function prompt_string(current_state) {
+  test = '\nAvailable Options (enter number to execute)\n';
+  options = {
+    "connected": "1) Create Game\n2) Join Game",
+    "waiting": "1) Leave Current Game"
+  }[current_state]
+
+  return test + options
 }
 
-//keypress(process.stdin);
-
-socket.on('connect', () => {
-  welcome();
-  current_state = 'connected';
+function prompt(current_state) {
+  console.log("\n==========BATTLESHIP PROTOCOL========");
+  console.log(prompt_string(current_state));
 
   readline.question('> ', input => {
     let message = "";
@@ -56,7 +59,7 @@ socket.on('connect', () => {
     if (parameters.length) {
       param_string = parameters.join(',')
 
-      readline.question('Enter parameters (space separated): ' + param_string + ' > ', param_input => {
+      readline.question('Enter parameters (space separated): ' + param_string + '\n> ', param_input => {
         message += param_input;
         message += '\n';
         socket.write(message);
@@ -66,20 +69,17 @@ socket.on('connect', () => {
       socket.write(message);
     }
   });
+}
 
-  //readline.prompt();
+//keypress(process.stdin);
+socket.on('connect', () => {
+  //welcome();
+  let current_state = 'connected';
 
-  //readline.on('line', input => {
-  //  valid_inputs = inputs_for_state[current_state];
-  //  if (input in valid_inputs) {
-  //      command = valid_inputs[input].command
-  //      console.log("command", command)
-  //  }
-  //});
-
+  prompt(current_state);
 
   socket.on('data', data => {
-    messages = data.toString('UTF8').trim().split('\n');
+    let messages = data.toString('UTF8').trim().split('\n');
 
     for (let i = 0; i < messages.length; i++) {
       let {command, params} = parseMessage(messages[i])
@@ -110,20 +110,11 @@ function parseMessage(message) {
   return {command: command, params: params}
 }
 
-process.stdin.on('keypress', function (ch, key) {
-  message += ch
-  if (key && key.ctrl && key.name == 'c') {
-    process.stdin.pause();
-    socket.end()
-  }
-
-  if (key && key.name == 'enter') {
-    socket.write(message);
-    message = '';
-  }
-
-});
-
 myEmitter.on('OK', function(params) {
   console.log("OK " + params[0])
+  prompt("waiting");
+});
+
+myEmitter.on('ERR', params => {
+  console.log("ERR " + params[0])
 });

@@ -143,6 +143,7 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
   if (params.length > 1) {
     //TODO SEND ERROR
     console.log("Too many parameters");
+    conn_wrapper.socket.write("ERR JOIN");
     return
   }
 
@@ -155,6 +156,7 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
     game_instances[name].forEach(function(wrapper) { wrapper.state = 'init_game'; });
   } else {
     console.log("Game does not exist");
+    conn_wrapper.socket.write("ERR JOIN");
   }
 
 });
@@ -177,7 +179,7 @@ myEmitter.on('CREATE', function(params, conn_wrapper) {
   }
 
   game_instances[name] = [conn_wrapper]
-  conn_wrapper.socket.write("OK CREATE")
+  conn_wrapper.socket.write("OK CREATE " + name +'\n')
   conn_wrapper.state = 'waiting';
 });
 
