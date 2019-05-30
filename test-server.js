@@ -5,6 +5,28 @@ const server = net.createServer();
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
 
+const grid = [ [0, 0, 0],
+               [0, 0, 0],
+               [0, 0, 0] ]
+
+const ships =  {
+  'destroyer': {size: 2, id: 5}
+}
+
+//TODO VALIDATE PLACEMENTS BEFORE CONFIRM
+
+const guess_map = {
+  'a1': [0, 0],
+  'b1': [0, 1],
+  'c1': [0, 2],
+  'a2': [1, 0],
+  'b2': [1, 1],
+  'c2': [1, 2],
+  'a3': [2, 0],
+  'b3': [2, 1],
+  'c3': [2, 2],
+}
+
 const commands = ['QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS"];
 const states = ['auth_user', 'auth_password', 'connected', 'waiting', 'init_game', 'confirm', 'play_game'];
 
@@ -34,6 +56,7 @@ function parseMessage(message) {
 }
 
 function handleConnection(conn) {
+
   var remoteAddress = conn.remoteAddress + ':' + conn.remotePort;
   conn.on('data', onConnData);
   conn.once('close', onConnClose);
@@ -41,13 +64,16 @@ function handleConnection(conn) {
 
   console.log("Client connected: ", remoteAddress);
 
-  let conn_wrapper = {socket: conn, state: 'connected'}
+  let conn_wrapper = {
+    socket: conn,
+    state: 'connected',
+    grid: [...grid],
+    game: null
+  }
 
   function onConnData(data) {
     console.log('connection data from %s: %j', remoteAddress, data);
     messages = data.toString('UTF8').trim().split('\n');
-
-    console.log("MESSAGES", messages);
 
     for (let i = 0; i < messages.length; i++) {
       let {command, params} = parseMessage(messages[i])
@@ -64,11 +90,13 @@ function handleConnection(conn) {
   }
 }
 
+
+
 function broadcast(instance, params, sender) {
   instance.forEach(function (conn) {
     if (conn === sender) return;
     var remoteAddress = sender.remoteAddress + ':' + sender.remotePort;
-    conn.write("OK " + remoteAddress);
+    conn.write("OK PLACE" + remoteAddress);
   });
 }
 
@@ -81,10 +109,7 @@ function cleanupInstance(instance_name) {
 }
 
 myEmitter.on('GQUIT', function(params, conn_wrapper) {
-  let instance_name;
-  [instance_name] = params;
-
-
+  let instance_name = conn_wrapper.game;
   let game_instance = game_instances[instance_name]
   let index = game_instance.indexOf(conn_wrapper)
 
@@ -92,6 +117,7 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
     game_instance.splice(index, 1);
     conn_wrapper.socket.write("OK GQUIT " + instance_name);
     conn_wrapper.state = 'connected';
+    conn_wrapper.game = null;
 
     if (game_instance.length) {
       let other_player = game_instance[0];
@@ -107,14 +133,17 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
 
 myEmitter.on('PLACE', function(params, conn_wrapper) {
   let instance_name, ship, loc, orient;
-  [instance_name, ship, loc, orient] = params;
+  [ship, loc, orient] = params;
+  instance_name = conn_wrapper.game;
   instance = game_instances[instance_name];
-  //broadcast(instance, [ship, loc, orient], conn)
 
   instance.forEach(function (wrapper) {
-    if (wrapper === conn_wrapper) return;
-    var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
-    wrapper.socket.write("OK " + remoteAddress);
+    if (wrapper === conn_wrapper) {
+      wrapper.socket.write("OK PLACE\n");
+    } else {
+      var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+      wrapper.socket.write("OPP_PLACE " + remoteAddress);
+    }
   });
 });
 
@@ -163,6 +192,8 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
   if (game_instances[name]) {
     conn_wrapper.socket.write("OK JOIN " + name + '\n');
     conn_wrapper.state = 'init_game';
+    conn_wrapper.game = name;
+
     game_instances[name].push(conn_wrapper);
 
     game_instances[name].forEach(wrapper => {
@@ -200,7 +231,8 @@ myEmitter.on('CREATE', function(params, conn_wrapper) {
   }
 
   game_instances[name] = [conn_wrapper]
-  conn_wrapper.socket.write("OK CREATE " + name +'\n')
+  conn_wrapper.socket.write("OK CREATE " + name +'\n');
+  conn_wrapper.game = name;
   conn_wrapper.state = 'waiting';
 });
 

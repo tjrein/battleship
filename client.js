@@ -7,7 +7,7 @@ let game_name = '';
 let current_message_component = 'command';
 let current_state = 'disconnected';
 
-const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT']
+const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE']
 
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
@@ -21,13 +21,21 @@ const inputs_for_state = {
     '2': {'command': 'JOIN', 'parameters': ['name']},
   },
   'waiting': {
-    '1': {'command': 'GQUIT', 'parameters': ['name'] }
+    '1': {'command': 'GQUIT', 'parameters': [] }
   },
   'init_game': {
     '1': {'command': 'PLACE', 'parameters': ['ship', 'grid_location', 'orientation']},
-    '2': {'command': 'GQUIT', 'parameters': ['name']},
-    '3': {'command': 'confirm'}
+    '2': {'command': 'CONFIRM', 'parameters': []},
+    '3': {'command': 'GQUIT', 'parameters': []}
   }
+}
+
+function console_out(msg) {
+    process.stdout.clearLine();
+    process.stdout.cursorTo(0);
+    console.log(msg);
+    readline.setPrompt('> ')
+    readline.prompt(true);
 }
 
 //helper function for console output to help client navigate protocol
@@ -36,9 +44,9 @@ function prompt_string(current_state) {
 
   //This instantiates options depending on what the current_state is.
   options = {
-    "connected": "1) Create Game\n2) Join Game",
-    "waiting": "1) Leave Game",
-    "init_game": "1) Place ship\n2) Leave Game"
+    "connected": "1) Create Game\n2) Join Game\n",
+    "waiting": "1) Leave Game\n",
+    "init_game": "1) Place ship\n2) Confirm Ship Placements\n3) Leave Game\n"
   }[current_state]
 
   return test + options
@@ -52,8 +60,8 @@ const readline = require('readline').createInterface({
 });
 
 function parameter_prompt(parameters) {
-  param_string = parameters.join(',')
-  readline.setPrompt('Enter the following parameters (space separated): ' + param_string + '\n> ');
+  param_string = parameters.join(', ')
+  readline.setPrompt('\nEnter the following parameters (space separated): ' + param_string + '\n\n> ');
   readline.prompt();
 
   //Somewhat hacky. Node is async, and this ensures proper execution order with line 77
@@ -77,7 +85,8 @@ readline.on('line', input => {
       if (parameters.length) {
         parameter_prompt(parameters);
       } else {
-        socket.write(message)
+        socket.write(message);
+        message = '';
       }
 
      } else {
@@ -110,6 +119,8 @@ function prompt(current_state) {
   console.log(prompt_string(current_state));
   readline.setPrompt("> ");
   readline.prompt();
+  //console_out("PLACED a ship");
+  //console_out("Placed another")
 }
 
 
@@ -125,8 +136,8 @@ socket.on('connect', () => {
 
     for (let i = 0; i < messages.length; i++) {
       let {command, params} = parseMessage(messages[i])
-      console.log("command", command);
-      console.log("params", params);
+      //console.log("command", command);
+      //console.log("params", params);
       executeCommand(command, params)
     }
 
@@ -170,8 +181,17 @@ myEmitter.on('OK', function(params) {
     game_name = params[1];
   }
 
+  if (successful_command === 'PLACE') {
+    console.log("\nSuccesfully placed Ship!");
+  }
+
   prompt(current_state);
 
+});
+
+myEmitter.on('OPP_PLACE', params => {
+  let opp = params[0];
+  console_out(opp + ' placed a ship\n');
 });
 
 myEmitter.on('OPP_LEFT', params => {
