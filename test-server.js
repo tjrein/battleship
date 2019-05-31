@@ -152,24 +152,35 @@ myEmitter.on('GUESS', function(params, conn_wrapper) {
 });
 
 myEmitter.on('CONFIRM', function(params, conn_wrapper) {
-  let name;
+  let instance_name = conn_wrapper.game;
   let confirm_count = 0;
-  [name] = params;
-  instance = game_instances[name];
+  let instance = game_instances[instance_name];
 
   if (instance) {
-    conn_wrapper.socket.write("OK CONFIRM");
+    //conn_wrapper.socket.write("OK CONFIRM");
     conn_wrapper.state = 'confirm';
 
-    instance.forEach(function (wrapper) {
+    instance.forEach(wrapper => {
       if (wrapper.state === 'confirm') {
         confirm_count += 1;
       }
     });
 
+    if (confirm_count === 1) {
+      instance.forEach(wrapper => {
+        if (wrapper !== conn_wrapper) {
+          var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+          wrapper.socket.write("OPP_CONFIRM " + remoteAddress);
+        } else {
+          conn_wrapper.socket.write("OK CONFIRM")
+        }
+      });
+    }
+
     if (confirm_count === 2) {
       instance.forEach(function (wrapper) {
         wrapper.state = 'play_game';
+        wrapper.socket.write("BEGIN");
       });
     }
   } else {

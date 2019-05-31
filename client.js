@@ -7,7 +7,7 @@ let game_name = '';
 let current_message_component = 'command';
 let current_state = 'disconnected';
 
-const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE']
+const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE', 'OPP_CONFIRM', 'BEGIN']
 
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
@@ -27,6 +27,13 @@ const inputs_for_state = {
     '1': {'command': 'PLACE', 'parameters': ['ship', 'grid_location', 'orientation']},
     '2': {'command': 'CONFIRM', 'parameters': []},
     '3': {'command': 'GQUIT', 'parameters': []}
+  },
+  'confirm': {
+    '1': {'command': 'GQUIT', 'parameters': [] }
+  },
+  'play_game': {
+    '1': {'command': 'GUESS', 'parameters': ['grid_location'] },
+    '2': {'command': 'GQUIT', 'parameters': [] }
   }
 }
 
@@ -46,7 +53,9 @@ function prompt_string(current_state) {
   options = {
     "connected": "1) Create Game\n2) Join Game\n",
     "waiting": "1) Leave Game\n",
-    "init_game": "1) Place ship\n2) Confirm Ship Placements\n3) Leave Game\n"
+    "init_game": "1) Place ship\n2) Confirm Ship Placements\n3) Leave Game\n",
+    "confirm": "1) Leave Game\n",
+    "play_game": "1) Guess\n2) Leave Game\n"
   }[current_state]
 
   return test + options
@@ -116,6 +125,11 @@ function prompt(current_state) {
     console.log("Waiting for opponent to join.");
   }
 
+  if (current_state === 'confirm') {
+    console.log("In Game: " + game_name);
+    console.log("Waiting for opponent to confirm ships.");
+  }
+
   console.log(prompt_string(current_state));
   readline.setPrompt("> ");
   readline.prompt();
@@ -136,8 +150,6 @@ socket.on('connect', () => {
 
     for (let i = 0; i < messages.length; i++) {
       let {command, params} = parseMessage(messages[i])
-      //console.log("command", command);
-      //console.log("params", params);
       executeCommand(command, params)
     }
 
@@ -185,8 +197,17 @@ myEmitter.on('OK', function(params) {
     console.log("\nSuccesfully placed Ship!");
   }
 
+  if (successful_command === 'CONFIRM') {
+    current_state = 'confirm';
+  }
+
   prompt(current_state);
 
+});
+
+myEmitter.on('BEGIN', () => {
+  current_state = 'play_game';
+  prompt(current_state);
 });
 
 myEmitter.on('OPP_PLACE', params => {
@@ -210,40 +231,11 @@ myEmitter.on('OPP_JOINED', params => {
   prompt(current_state);
 });
 
+myEmitter.on('OPP_CONFIRM', params => {
+  let opp = params[0];
+  console_out(opp + ' confirmed ships, and is ready to play!');
+});
+
 myEmitter.on('ERR', params => {
   console.log("ERR " + params[0])
 });
-
-
-
-
-  //readline.question('> ', input => {
-  //  let message = "";
-  //  let command = "";
-  //  let parameters = [];
-
-    //array of inputs that can be executed in the current_state
-  //  valid_inputs = inputs_for_state[current_state];
-  //  if (input in valid_inputs) {
-  //      command = valid_inputs[input].command
-  //      parameters = valid_inputs[input].parameters
-  //  }
-
-  //  message += command + ' '
-
-  //  if (parameters.length) {
-  //    param_string = parameters.join(',')
-
-      //Prompts for all command parameters at once.
-      //Not ideal, but since node is async, this attempts to avoid the so called "callback hell'
-  //    readline.question('Enter parameters (space separated): ' + param_string + '\n> ', param_input => {
-  //      message += param_input;
-  //      message += '\n';
-  //      socket.write(message);
-  //    });
-
-  //  } else {
-  //    message += "\n";
-  //    socket.write(message);
-  //  }
-  //});
