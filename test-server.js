@@ -221,6 +221,12 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
     console.log("Game does not exist");
     conn_wrapper.socket.write("ERR JOIN");
   }
+});
+
+myEmitter.on('GUESS', (params, conn_wrapper) => {
+  let game_instance = game_instance[conn_wrapper.game];
+  let opponent = game_instances.filter(wrapper => wrapper !== conn_wrapper);
+  let player = conn_wrapper;
 
 });
 
