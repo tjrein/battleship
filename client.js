@@ -7,7 +7,7 @@ let game_name = '';
 let current_message_component = 'command';
 let current_state = 'disconnected';
 
-const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE', 'OPP_CONFIRM', 'BEGIN']
+const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE', 'OPP_CONFIRM', 'BEGIN', 'HIT', 'MISS', 'SUNK']
 
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
@@ -203,6 +203,24 @@ myEmitter.on('OK', function(params) {
 
   prompt(current_state);
 
+});
+
+myEmitter.on('SUNK', (params) => {
+  let ship = params[0];
+  console.log("\nYou sunk the " + ship + "!");
+  prompt(current_state);
+})
+
+myEmitter.on('HIT', (params) => {
+  let location = params[0];
+  console.log("\nHit " + location + "!");
+  prompt(current_state);
+});
+
+myEmitter.on('MISS', (params) => {
+  let location = params[0];
+  console.log("\nMiss " + location + "!");
+  prompt(current_state);
 });
 
 myEmitter.on('BEGIN', () => {

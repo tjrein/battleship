@@ -5,15 +5,17 @@ const server = net.createServer();
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
 
-const grid = [ [0, 0, 0],
-               [0, 0, 0],
-               [0, 0, 0] ]
+const grid_shape = [ [0, 0, 0],
+                     [0, 0, 0],
+                     [0, 0, 0] ]
+
+const ships_by_id = {
+  5: 'destroyer'
+}
 
 const ships =  {
   'destroyer': {size: 2, id: 5}
 }
-
-//TODO VALIDATE PLACEMENTS BEFORE CONFIRM
 
 const guess_map = {
   'a1': [0, 0],
@@ -26,6 +28,53 @@ const guess_map = {
   'b3': [2, 1],
   'c3': [2, 2],
 }
+
+function validate_sunk(id, grid) {
+  for (let i=0; i < grid.length; i++) {
+    let row = grid[i];
+    if (row.includes(id)) return false;
+  }
+  return true;
+}
+
+function validate_win(grid) {
+  let ship_ids = ships_by_id.keys();
+}
+
+function validate_placement(ship_name, location, orientation, conn_wrapper) {
+  //TODO MORE VALIDATION
+
+  let ship = ships[ship_name];
+  let grid = conn_wrapper.grid;
+
+  let positions = [];
+  starting_position = guess_map[location];
+  positions.push(starting_position);
+
+  if (!ship) {
+    console.l
+    og("Not a valid ship!");
+    return false
+  }
+
+  for (i=0; i < ship.size - 1; i++) {
+    let last_entry = positions[positions.length - 1];
+    let new_entry = [];
+    if (orientation ===  'h') {
+      new_entry = [last_entry[0], last_entry[1] + 1];
+    }
+
+    if (orientation === 'v') {
+      new_entry = [last_entry[0] + 1, last_entry[1]];
+    }
+    positions.push(new_entry);
+  }
+
+  for (position of positions) {
+    grid[position[0]][position[1]] = ship.id;
+  }
+}
+
 
 const commands = ['QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS"];
 const states = ['auth_user', 'auth_password', 'connected', 'waiting', 'init_game', 'confirm', 'play_game'];
@@ -67,8 +116,8 @@ function handleConnection(conn) {
   let conn_wrapper = {
     socket: conn,
     state: 'connected',
-    grid: [...grid],
-    game: null
+    game: null,
+    grid: JSON.parse(JSON.stringify(grid_shape)) //deep clone grid,
   }
 
   function onConnData(data) {
@@ -89,8 +138,6 @@ function handleConnection(conn) {
     console.log('Connection %s error: %s', remoteAddress, err.message);
   }
 }
-
-
 
 function broadcast(instance, params, sender) {
   instance.forEach(function (conn) {
@@ -118,6 +165,7 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
     conn_wrapper.socket.write("OK GQUIT " + instance_name);
     conn_wrapper.state = 'connected';
     conn_wrapper.game = null;
+    conn_wrapper.grid = JSON.parse(JSON.stringify(grid_shape))
 
     if (game_instance.length) {
       let other_player = game_instance[0];
@@ -137,6 +185,10 @@ myEmitter.on('PLACE', function(params, conn_wrapper) {
   instance_name = conn_wrapper.game;
   instance = game_instances[instance_name];
 
+  validate_placement(ship, loc, orient, conn_wrapper)
+
+  console.log("HEY", conn_wrapper.grid)
+
   instance.forEach(function (wrapper) {
     if (wrapper === conn_wrapper) {
       wrapper.socket.write("OK PLACE\n");
@@ -145,10 +197,6 @@ myEmitter.on('PLACE', function(params, conn_wrapper) {
       wrapper.socket.write("OPP_PLACE " + remoteAddress);
     }
   });
-});
-
-myEmitter.on('GUESS', function(params, conn_wrapper) {
-  console.log("LETS SEE STATE", conn_wrapper.state);
 });
 
 myEmitter.on('CONFIRM', function(params, conn_wrapper) {
@@ -224,10 +272,37 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
 });
 
 myEmitter.on('GUESS', (params, conn_wrapper) => {
-  let game_instance = game_instance[conn_wrapper.game];
-  let opponent = game_instances.filter(wrapper => wrapper !== conn_wrapper);
+  let instance = game_instances[conn_wrapper.game];
+  let location = params[0];
   let player = conn_wrapper;
+  let opponent = instance.filter(wrapper => wrapper !== conn_wrapper)[0];
 
+  let [y, x] = guess_map[location];
+
+  if (opponent.grid[y][x]) {
+    let ship_id = opponent.grid[y][x];
+    console.log("ship", ships_by_id[ship_id]);
+    opponent.grid[y][x] = 'x';
+
+    let ship_is_sunk = validate_sunk(ship_id, opponent.grid);
+
+    if (ship_is_sunk) {
+      let win_condition = validate_win(opponent.grid);
+
+      } else {
+        player.socket.write("SUNK " + ships_by_id[ship_id]);
+      }
+
+    } else {
+      player.socket.write("HIT " + location);
+    }
+
+  } else {
+    player.socket.write("MISS " + location);
+  }
+
+  console.log("player grid", player.grid);
+  console.log("opponent grid", opponent.grid);
 });
 
 myEmitter.on('CREATE', function(params, conn_wrapper) {
