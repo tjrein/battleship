@@ -10,6 +10,8 @@ const users = {
   "bar": {'password': 'password'}
 }
 
+const version = 1.0;
+
 const grid_shape = [ [0, 0, 0],
                      [0, 0, 0],
                      [0, 0, 0] ]
@@ -122,12 +124,12 @@ function parseMessage(message) {
 
 function handleConnection(conn) {
 
-  var remoteAddress = conn.remoteAddress + ':' + conn.remotePort;
+  var client_address = conn.remoteAddress + ':' + conn.remotePort;
   conn.on('data', onConnData);
   conn.once('close', onConnClose);
   conn.on('error', onConnError);
 
-  console.log("Client connected: ", remoteAddress);
+  console.log("Client connected: ", client_address);
 
   let conn_wrapper = {
     socket: conn,
@@ -138,7 +140,7 @@ function handleConnection(conn) {
   }
 
   function onConnData(data) {
-    console.log('connection data from %s: %j', remoteAddress, data);
+    console.log('connection data from %s: %j', client_address, data);
     messages = data.toString('UTF8').trim().split('\n');
 
     for (let i = 0; i < messages.length; i++) {
@@ -148,20 +150,12 @@ function handleConnection(conn) {
   }
 
   function onConnClose() {
-    console.log('connection from %s closed', remoteAddress);
+    console.log('connection from %s closed', client_address);
   }
 
   function onConnError(err) {
-    console.log('Connection %s error: %s', remoteAddress, err.message);
+    console.log('Connection %s error: %s', client_address, err.message);
   }
-}
-
-function broadcast(instance, params, sender) {
-  instance.forEach(function (conn) {
-    if (conn === sender) return;
-    var remoteAddress = sender.remoteAddress + ':' + sender.remotePort;
-    conn.write("OK PLACE" + remoteAddress);
-  });
 }
 
 function cleanupInstance(instance_name) {
@@ -206,9 +200,10 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
 
     if (game_instance.length) {
       let other_player = game_instance[0];
-      let remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+      //let remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+      let player = conn_wrapper.username;
 
-      other_player.socket.write("OPP_LEFT " + remoteAddress);
+      other_player.socket.write("OPP_LEFT " + player);
       other_player.state = 'waiting';
     }
   }
@@ -295,8 +290,9 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
 
       //let other player know the game has been joined
       if (wrapper !== conn_wrapper) {
-        var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
-        wrapper.socket.write("OPP_JOINED " + remoteAddress);
+        //var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+        let opponent_name = conn_wrapper.username;
+        wrapper.socket.write("OPP_JOINED " + opponent_name);
       }
     });
 
