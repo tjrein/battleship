@@ -7,7 +7,7 @@ let game_name = '';
 let current_message_component = 'command';
 let current_state = 'disconnected';
 
-const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE', 'OPP_CONFIRM', 'BEGIN', 'HIT', 'MISS', 'SUNK']
+const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE', 'OPP_CONFIRM', 'OPP_REMATCH', 'BEGIN', 'REINIT', 'HIT', 'MISS', 'SUNK', 'WINNER'];
 
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
@@ -34,6 +34,13 @@ const inputs_for_state = {
   'play_game': {
     '1': {'command': 'GUESS', 'parameters': ['grid_location'] },
     '2': {'command': 'GQUIT', 'parameters': [] }
+  },
+  'finish_game': {
+    '1': {'command': 'REMATCH', 'parameters': [] },
+    '2': {'command': 'GQUIT', 'parameters': []}
+  },
+  'rematch': {
+    '1': {'command': 'GQUIT', 'parameters': [] }
   }
 }
 
@@ -55,7 +62,9 @@ function prompt_string(current_state) {
     "waiting": "1) Leave Game\n",
     "init_game": "1) Place ship\n2) Confirm Ship Placements\n3) Leave Game\n",
     "confirm": "1) Leave Game\n",
-    "play_game": "1) Guess\n2) Leave Game\n"
+    "play_game": "1) Guess\n2) Leave Game\n",
+    "finish_game": "1) Rematch\n2) Leave Game\n",
+    "rematch": "1) Leave Rematch Game\n"
   }[current_state]
 
   return test + options
@@ -201,8 +210,19 @@ myEmitter.on('OK', function(params) {
     current_state = 'confirm';
   }
 
+  if (successful_command === 'REMATCH') {
+    current_state = 'rematch';
+  }
+
   prompt(current_state);
 
+});
+
+myEmitter.on('WINNER', (params) => {
+  let player = params[0];
+  console.log("\n" + player + " won the game!");
+  current_state = 'finish_game';
+  prompt(current_state);
 });
 
 myEmitter.on('SUNK', (params) => {
@@ -223,6 +243,11 @@ myEmitter.on('MISS', (params) => {
   prompt(current_state);
 });
 
+myEmitter.on('REINIT', () => {
+  current_state = 'init_game';
+  prompt(current_state);
+});
+
 myEmitter.on('BEGIN', () => {
   current_state = 'play_game';
   prompt(current_state);
@@ -239,6 +264,11 @@ myEmitter.on('OPP_LEFT', params => {
   console.log(opp + ' has left the game!');
   current_state = 'waiting';
   prompt(current_state);
+});
+
+myEmitter.on('OPP_REMATCH', params => {
+  let opp = params[0];
+  console_out(opp + ' wants a rematch!\n');
 });
 
 myEmitter.on('OPP_JOINED', params => {

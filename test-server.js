@@ -29,6 +29,10 @@ const guess_map = {
   'c3': [2, 2],
 }
 
+function clone_grid(grid) {
+  return JSON.parse(JSON.stringify(grid))
+}
+
 function validate_sunk(id, grid) {
   for (let i=0; i < grid.length; i++) {
     let row = grid[i];
@@ -38,7 +42,14 @@ function validate_sunk(id, grid) {
 }
 
 function validate_win(grid) {
-  let ship_ids = ships_by_id.keys();
+  for (let i = 0; i < grid.length; i++) {
+    let row = grid[i];
+    let pass = row.every(position => position === 0 || position === 'x');
+
+    if (!pass) return false;
+  }
+
+  return true;
 }
 
 function validate_placement(ship_name, location, orientation, conn_wrapper) {
@@ -52,8 +63,7 @@ function validate_placement(ship_name, location, orientation, conn_wrapper) {
   positions.push(starting_position);
 
   if (!ship) {
-    console.l
-    og("Not a valid ship!");
+    console.log("Not a valid ship!");
     return false
   }
 
@@ -73,6 +83,8 @@ function validate_placement(ship_name, location, orientation, conn_wrapper) {
   for (position of positions) {
     grid[position[0]][position[1]] = ship.id;
   }
+
+  console.log("grid", grid);
 }
 
 
@@ -187,8 +199,6 @@ myEmitter.on('PLACE', function(params, conn_wrapper) {
 
   validate_placement(ship, loc, orient, conn_wrapper)
 
-  console.log("HEY", conn_wrapper.grid)
-
   instance.forEach(function (wrapper) {
     if (wrapper === conn_wrapper) {
       wrapper.socket.write("OK PLACE\n");
@@ -271,6 +281,44 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
   }
 });
 
+myEmitter.on('REMATCH', (params, conn_wrapper) => {
+  let instance_name = conn_wrapper.game;
+  let rematch_count = 0;
+  let instance = game_instances[instance_name];
+
+  if (instance) {
+    //conn_wrapper.socket.write("OK CONFIRM");
+    conn_wrapper.state = 'rematch';
+
+    instance.forEach(wrapper => {
+      if (wrapper.state === 'rematch') {
+        rematch_count += 1;
+      }
+    });
+
+    if (rematch_count === 1) {
+      instance.forEach(wrapper => {
+        if (wrapper !== conn_wrapper) {
+          var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
+          wrapper.socket.write("OPP_REMATCH " + remoteAddress);
+        } else {
+          conn_wrapper.socket.write("OK REMATCH")
+        }
+      });
+    }
+
+    if (rematch_count === 2) {
+      instance.forEach(function (wrapper) {
+        wrapper.grid = clone_grid(grid_shape);
+        wrapper.state = 'init_game';
+        wrapper.socket.write("REINIT");
+      });
+    }
+  } else {
+    console.log("Game does not exist");
+  }
+});
+
 myEmitter.on('GUESS', (params, conn_wrapper) => {
   let instance = game_instances[conn_wrapper.game];
   let location = params[0];
@@ -281,7 +329,6 @@ myEmitter.on('GUESS', (params, conn_wrapper) => {
 
   if (opponent.grid[y][x]) {
     let ship_id = opponent.grid[y][x];
-    console.log("ship", ships_by_id[ship_id]);
     opponent.grid[y][x] = 'x';
 
     let ship_is_sunk = validate_sunk(ship_id, opponent.grid);
@@ -289,6 +336,9 @@ myEmitter.on('GUESS', (params, conn_wrapper) => {
     if (ship_is_sunk) {
       let win_condition = validate_win(opponent.grid);
 
+      if (win_condition) {
+        player.socket.write("WINNER " + "Bill");
+        opponent.socket.write("WINNER " + "Bill");
       } else {
         player.socket.write("SUNK " + ships_by_id[ship_id]);
       }
@@ -301,8 +351,6 @@ myEmitter.on('GUESS', (params, conn_wrapper) => {
     player.socket.write("MISS " + location);
   }
 
-  console.log("player grid", player.grid);
-  console.log("opponent grid", opponent.grid);
 });
 
 myEmitter.on('CREATE', function(params, conn_wrapper) {
