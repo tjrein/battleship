@@ -5,6 +5,11 @@ const server = net.createServer();
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
 
+const users = {
+  "foo": {'password': 'password'},
+  "bar": {'password': 'password'}
+}
+
 const grid_shape = [ [0, 0, 0],
                      [0, 0, 0],
                      [0, 0, 0] ]
@@ -88,10 +93,9 @@ function validate_placement(ship_name, location, orientation, conn_wrapper) {
 }
 
 
-const commands = ['QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS"];
-const states = ['auth_user', 'auth_password', 'connected', 'waiting', 'init_game', 'confirm', 'play_game'];
+const commands = ['QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS", "USER", "PASSWORD"];
+const states = ['auth_user', 'auth_password', 'set_nick', 'connected', 'waiting', 'init_game', 'confirm', 'play_game'];
 
-let current_state = 'connected'
 let game_instances = {}
 
 server.listen(9000, function() {
@@ -127,7 +131,8 @@ function handleConnection(conn) {
 
   let conn_wrapper = {
     socket: conn,
-    state: 'connected',
+    state: 'auth_user',
+    username: null,
     game: null,
     grid: JSON.parse(JSON.stringify(grid_shape)) //deep clone grid,
   }
@@ -166,6 +171,26 @@ function cleanupInstance(instance_name) {
     delete game_instances[instance_name]
   }
 }
+
+myEmitter.on('USER', (params, conn_wrapper) => {
+  console.log("SHIT")
+  let username = params[0];
+  if (username in users) {
+    conn_wrapper.username = username;
+    conn_wrapper.socket.write('OK USER ' + username);
+  }
+});
+
+myEmitter.on('PASSWORD', (params, conn_wrapper) => {
+  let password = params[0];
+  username = conn_wrapper.username;
+
+  if (password === users[username].password) {
+    conn_wrapper.socket.write('OK PASSWORD');
+  } else {
+    conn_wrapper.socket.write('ERR PASSWORD');
+  }
+});
 
 myEmitter.on('GQUIT', function(params, conn_wrapper) {
   let instance_name = conn_wrapper.game;

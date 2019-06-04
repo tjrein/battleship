@@ -2,6 +2,8 @@ const net = require('net');
 const EventEmitter = require('events');
 var keypress = require('keypress');
 
+const version = 1.0;
+
 let message = '';
 let game_name = '';
 let current_message_component = 'command';
@@ -16,6 +18,12 @@ const socket = net.createConnection({ port: 9000, host: 'localhost' });
 
 //this object keeps track of what inputs can be entered by the client in a particular state
 const inputs_for_state = {
+  'auth_user': {
+    '1': {'command': 'USER', 'parameters': ['username']}
+  },
+  'auth_password': {
+    '1': {'command': 'PASSWORD', 'parameters': ['password']}
+  },
   'connected': {
     '1': {'command': 'CREATE', 'parameters': ['name']},
     '2': {'command': 'JOIN', 'parameters': ['name']},
@@ -58,6 +66,8 @@ function prompt_string(current_state) {
 
   //This instantiates options depending on what the current_state is.
   options = {
+    "auth_user": "1) Enter Username \n",
+    "auth_password": "1) Enter Password \n",
     "connected": "1) Create Game\n2) Join Game\n",
     "waiting": "1) Leave Game\n",
     "init_game": "1) Place ship\n2) Confirm Ship Placements\n3) Leave Game\n",
@@ -82,7 +92,7 @@ function parameter_prompt(parameters) {
   readline.setPrompt('\nEnter the following parameters (space separated): ' + param_string + '\n\n> ');
   readline.prompt();
 
-  //Somewhat hacky. Node is async, and this ensures proper execution order with line 77
+  //Somewhat hacky. Node is async, and this ensures proper execution order
   setTimeout(() => {
     current_message_component = 'parameters';
   }, 0)
@@ -141,16 +151,12 @@ function prompt(current_state) {
 
   console.log(prompt_string(current_state));
   readline.setPrompt("> ");
-  readline.prompt();
-  //console_out("PLACED a ship");
-  //console_out("Placed another")
+  readline.prompt(true);
 }
 
 
-//keypress(process.stdin);
 socket.on('connect', () => {
-  //welcome();
-  current_state = 'connected';
+  current_state = 'auth_user';
 
   prompt(current_state);
 
@@ -188,6 +194,14 @@ function parseMessage(message) {
 myEmitter.on('OK', function(params) {
   let successful_command = params[0];
 
+  if (successful_command === 'USER') {
+    current_state = 'auth_password';
+  }
+
+  if (successful_command === 'PASSWORD') {
+    current_state = 'connected';
+  }
+
   if (successful_command === 'CREATE') {
     current_state = 'waiting';
     game_name = params[1];
@@ -217,6 +231,16 @@ myEmitter.on('OK', function(params) {
   prompt(current_state);
 
 });
+
+myEmitter.on('ERR', params => {
+  let failed_command = params[0];
+
+  if (failed_command === 'PASSWORD') {
+    console.log("\nInvalid Password!");
+  }
+
+  prompt(current_state);
+})
 
 myEmitter.on('WINNER', (params) => {
   let player = params[0];
@@ -282,8 +306,4 @@ myEmitter.on('OPP_JOINED', params => {
 myEmitter.on('OPP_CONFIRM', params => {
   let opp = params[0];
   console_out(opp + ' confirmed ships, and is ready to play!');
-});
-
-myEmitter.on('ERR', params => {
-  console.log("ERR " + params[0])
 });
