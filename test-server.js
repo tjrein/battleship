@@ -5,37 +5,8 @@ const server = net.createServer();
 class BattleshipEmitter extends EventEmitter {}
 const b_emit = new BattleshipEmitter();
 
-//TODO validate commands and state
-//TODO refactor
-
-//BEGIN CONFIG
-const users = {
-  "foo": {'password': 'password'},
-  "bar": {'password': 'password'}
-}
-const versions = [1.0];
-
-const grid_shape = [ [0, 0, 0],
-                     [0, 0, 0],
-                     [0, 0, 0] ]
-const ships_by_id = {
-  5: 'destroyer'
-}
-const ships =  {
-  'destroyer': {size: 2, id: 5}
-}
-const guess_map = {
-  'a1': [0, 0],
-  'b1': [0, 1],
-  'c1': [0, 2],
-  'a2': [1, 0],
-  'b2': [1, 1],
-  'c2': [1, 2],
-  'a3': [2, 0],
-  'b3': [2, 1],
-  'c3': [2, 2],
-}
-//END CONFIG
+const config = require("./server-config.json");
+const {users, versions, grid_shape, ships_by_id, ships, guess_map} = config;
 
 //BEGIN HELPER FUNCTIONS
 function clone_grid(grid) {
@@ -136,10 +107,19 @@ function executeCommand(command, parameters, conn_wrapper) {
 
 function parseMessage(message) {
 
-  console.log("MESSAGE", message);
+  let components;
 
-  //check for escape whitespace scharacter, otherwise split on space
-  components = message.includes(':') ? message.split(' :') : message.split(" ");
+  //process escpaed whitespace
+  if (message.includes(':')) {
+    let ind = message.indexOf(':');
+    let esc_param = message.slice(ind + 1, message.length);
+    let upto_esc = message.slice(0, ind - 1);
+    components = upto_esc.split(" ");
+    components.push(esc_param);
+  } else {
+    components = message.split(" ");
+  }
+
   command = components[0];
   params = components.splice(1, components.length - 1);
   return {command: command, params: params}
