@@ -422,11 +422,10 @@ b_emit.on('CREATE', function(params, conn_wrapper) {
 
   name = params[0];
 
-  console.log("NAME", name);
-
   if (game_instances[name]) {
-    console.log("GAME " + name + " already exists");
-    return
+    let reason = "Game: \'" + name + "\' already exists";
+    console.log(reason);
+    return conn_wrapper.socket.write("ERR CREATE " + ':'.concat(reason));
   }
 
   game_instances[name] = [conn_wrapper];

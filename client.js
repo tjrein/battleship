@@ -231,9 +231,8 @@ function parseMessage(message) {
   These functions listen for messages from the server
   Primarily Update client state and prompt for additonal input depending on state.
 */
-b_emit.on('OK', function(params, test) {
+b_emit.on('OK', function(params) {
   console.log("PARAMS", params);
-  console.log("test", test);
 
   let successful_command = params[0];
 
@@ -288,6 +287,10 @@ b_emit.on('ERR', params => {
 
   if (failed_command === 'PLACE') {
     console.log("\nInvalid placement!");
+  }
+
+  if (failed_command === 'CREATE') {
+    console.log("\n" + reason);
   }
 
   prompt(current_state);
