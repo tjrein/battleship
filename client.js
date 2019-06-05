@@ -10,10 +10,22 @@ let current_state = 'disconnected';
 
 const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE', 'OPP_CONFIRM', 'OPP_REMATCH', 'BEGIN', 'REINIT', 'HIT', 'MISS', 'SUNK', 'WINNER'];
 
-class MyEmitter extends EventEmitter {}
-const myEmitter = new MyEmitter();
+class BattleshipEmitter extends EventEmitter {}
+const b_emit = new BattleshipEmitter();
 
-const socket = net.createConnection({ port: 9000, host: 'localhost' });
+//Process host passed from client on command line
+let host = 'localhost'; //default to localhost
+const args = process.argv.slice(2);
+if (args.length) {
+  for (i = 0; i < args.length; i++) {
+    let [key, val] = args[i].split("=");
+    if (key === 'host') {
+      host = val;
+    }
+  }
+}
+
+const socket = net.createConnection({ port: 7999, host: host });
 
 //this object keeps track of what inputs can be entered by the client in a particular state
 const inputs_for_state = {
@@ -106,8 +118,8 @@ readline.on('line', input => {
     valid_inputs = inputs_for_state[current_state];
 
     if (input in valid_inputs) {
-      command = valid_inputs[input].command;
-      parameters = valid_inputs[input].parameters;
+      let command = valid_inputs[input].command;
+      let parameters = valid_inputs[input].parameters;
 
       message += command + ' ';
 
@@ -126,6 +138,15 @@ readline.on('line', input => {
   }
 
   if (current_message_component === 'parameters') {
+    //escape space characters for JOIN and CREATE
+    //Message at this point will just the command
+    let command = message;
+    if (command === 'CREATE ' || command === 'JOIN ') {
+      input = ':'.concat(input);
+    }
+
+    console.log("input", input);
+
     message += input + '\n';
     socket.write(message);
 
@@ -162,8 +183,6 @@ socket.on('connect', () => {
   //send CONNECT message for version negotiation
   socket.write('CONNECT ' + version + "\n");
 
-  //prompt(current_state);
-
   socket.on('data', data => {
     let messages = data.toString('UTF8').trim().split('\n');
 
@@ -182,14 +201,26 @@ socket.on('connect', () => {
 
 function executeCommand(command, parameters) {
   if (commands.includes(command)) {
-    myEmitter.emit(command, parameters)
+    b_emit.emit(command, parameters)
   } else {
     console.log("COMMAND NOT FOUND");
   }
 }
 
 function parseMessage(message) {
-  let components = message.split(' ')
+  let components;
+
+  //process escpaed whitespace
+  if (message.includes(':')) {
+    let ind = message.indexOf(':');
+    let esc_param = message.slice(ind + 1, message.length);
+    let upto_esc = message.slice(0, ind - 1);
+    components = upto_esc.split(" ");
+    components.push(esc_param);
+  } else {
+    components = message.split(" ");
+  }
+
   let command = components[0]
   let params = components.splice(1, components.length - 1)
   return {command: command, params: params}
@@ -200,7 +231,10 @@ function parseMessage(message) {
   These functions listen for messages from the server
   Primarily Update client state and prompt for additonal input depending on state.
 */
-myEmitter.on('OK', function(params) {
+b_emit.on('OK', function(params, test) {
+  console.log("PARAMS", params);
+  console.log("test", test);
+
   let successful_command = params[0];
 
   if (successful_command === 'CONNECT') {
@@ -218,7 +252,7 @@ myEmitter.on('OK', function(params) {
 
   if (successful_command === 'CREATE') {
     current_state = 'waiting';
-    game_name = params[1];
+    game_name = params.splice(1, params.length -1 );
   }
 
   if (successful_command === 'GQUIT') {
@@ -244,7 +278,7 @@ myEmitter.on('OK', function(params) {
   prompt(current_state);
 });
 
-myEmitter.on('ERR', params => {
+b_emit.on('ERR', params => {
   let failed_command = params[0];
   let reason = params[1];
 
@@ -259,47 +293,47 @@ myEmitter.on('ERR', params => {
   prompt(current_state);
 })
 
-myEmitter.on('WINNER', (params) => {
+b_emit.on('WINNER', (params) => {
   let player = params[0];
   console.log("\n" + player + " won the game!");
   current_state = 'finish_game';
   prompt(current_state);
 });
 
-myEmitter.on('SUNK', (params) => {
+b_emit.on('SUNK', (params) => {
   let ship = params[0];
   console.log("\nYou sunk the " + ship + "!");
   prompt(current_state);
 })
 
-myEmitter.on('HIT', (params) => {
+b_emit.on('HIT', (params) => {
   let location = params[0];
   console.log("\nHit " + location + "!");
   prompt(current_state);
 });
 
-myEmitter.on('MISS', (params) => {
+b_emit.on('MISS', (params) => {
   let location = params[0];
   console.log("\nMiss " + location + "!");
   prompt(current_state);
 });
 
-myEmitter.on('REINIT', () => {
+b_emit.on('REINIT', () => {
   current_state = 'init_game';
   prompt(current_state);
 });
 
-myEmitter.on('BEGIN', () => {
+b_emit.on('BEGIN', () => {
   current_state = 'play_game';
   prompt(current_state);
 });
 
-myEmitter.on('OPP_PLACE', params => {
+b_emit.on('OPP_PLACE', params => {
   let opp = params[0];
   console_out(opp + ' placed a ship\n');
 });
 
-myEmitter.on('OPP_LEFT', params => {
+b_emit.on('OPP_LEFT', params => {
   let opp = params[0];
   console.log("\n");
   console.log(opp + ' has left the game!');
@@ -307,12 +341,12 @@ myEmitter.on('OPP_LEFT', params => {
   prompt(current_state);
 });
 
-myEmitter.on('OPP_REMATCH', params => {
+b_emit.on('OPP_REMATCH', params => {
   let opp = params[0];
   console_out(opp + ' wants a rematch!\n');
 });
 
-myEmitter.on('OPP_JOINED', params => {
+b_emit.on('OPP_JOINED', params => {
   let opp = params[0];
   console.log("\n");
   console.log(opp + ' has joined the game!');
@@ -320,7 +354,7 @@ myEmitter.on('OPP_JOINED', params => {
   prompt(current_state);
 });
 
-myEmitter.on('OPP_CONFIRM', params => {
+b_emit.on('OPP_CONFIRM', params => {
   let opp = params[0];
   console_out(opp + ' confirmed ships, and is ready to play!');
 });

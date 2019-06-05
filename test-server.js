@@ -2,10 +2,9 @@ const EventEmitter = require('events');
 const net = require('net');
 const server = net.createServer();
 
-class MyEmitter extends EventEmitter {}
-const myEmitter = new MyEmitter();
+class BattleshipEmitter extends EventEmitter {}
+const b_emit = new BattleshipEmitter();
 
-//TODO NEGOTIATE version
 //TODO validate commands and state
 //TODO refactor
 
@@ -86,7 +85,6 @@ function validate_placement(ship_name, location, orientation, conn_wrapper) {
   }
 
   for (i=0; i < ship.size - 1; i++) {
-    console.log("HEy");
     let last_entry = positions[positions.length - 1];
     let new_entry = [];
     if (orientation ===  'h') {
@@ -122,7 +120,7 @@ const states = ['negotiate_version', 'auth_user', 'auth_password', 'connected', 
 
 let game_instances = {}
 
-server.listen(9000, function() {
+server.listen(7999, function() {
   console.log('server listening to %j', server.address());
 });
 
@@ -130,16 +128,20 @@ server.on('connection', handleConnection);
 
 function executeCommand(command, parameters, conn_wrapper) {
   if (commands.includes(command)) {
-    myEmitter.emit(command, parameters, conn_wrapper)
+    b_emit.emit(command, parameters, conn_wrapper)
   } else {
     console.log("COMMAND NOT FOUND")
   }
 }
 
 function parseMessage(message) {
-  components = message.split(' ')
-  command = components[0]
-  params = components.splice(1, components.length - 1)
+
+  console.log("MESSAGE", message);
+
+  //check for escape whitespace scharacter, otherwise split on space
+  components = message.includes(':') ? message.split(' :') : message.split(" ");
+  command = components[0];
+  params = components.splice(1, components.length - 1);
   return {command: command, params: params}
 }
 
@@ -185,7 +187,7 @@ function cleanupInstance(instance_name) {
   }
 }
 
-myEmitter.on('USER', (params, conn_wrapper) => {
+b_emit.on('USER', (params, conn_wrapper) => {
   let username = params[0];
   if (username in users) {
     conn_wrapper.username = username;
@@ -193,7 +195,7 @@ myEmitter.on('USER', (params, conn_wrapper) => {
   }
 });
 
-myEmitter.on('PASSWORD', (params, conn_wrapper) => {
+b_emit.on('PASSWORD', (params, conn_wrapper) => {
   let password = params[0];
   username = conn_wrapper.username;
 
@@ -204,7 +206,7 @@ myEmitter.on('PASSWORD', (params, conn_wrapper) => {
   }
 });
 
-myEmitter.on('GQUIT', function(params, conn_wrapper) {
+b_emit.on('GQUIT', function(params, conn_wrapper) {
   let instance_name = conn_wrapper.game;
   let game_instance = game_instances[instance_name]
   let index = game_instance.indexOf(conn_wrapper)
@@ -228,7 +230,7 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
   cleanupInstance(instance_name)
 });
 
-myEmitter.on('CONNECT', (params, conn_wrapper) => {
+b_emit.on('CONNECT', (params, conn_wrapper) => {
   let [desired_version] = params;
 
   //Get all versions upto client requested version and select the highest one.
@@ -239,7 +241,7 @@ myEmitter.on('CONNECT', (params, conn_wrapper) => {
 
 });
 
-myEmitter.on('PLACE', function(params, conn_wrapper) {
+b_emit.on('PLACE', function(params, conn_wrapper) {
   let instance_name, ship, loc, orient;
   [ship, loc, orient] = params;
   instance_name = conn_wrapper.game;
@@ -261,7 +263,7 @@ myEmitter.on('PLACE', function(params, conn_wrapper) {
   });
 });
 
-myEmitter.on('CONFIRM', function(params, conn_wrapper) {
+b_emit.on('CONFIRM', function(params, conn_wrapper) {
   let instance_name = conn_wrapper.game;
   let confirm_count = 0;
   let instance = game_instances[instance_name];
@@ -298,7 +300,7 @@ myEmitter.on('CONFIRM', function(params, conn_wrapper) {
   }
 });
 
-myEmitter.on('JOIN', function(params, conn_wrapper) {
+b_emit.on('JOIN', function(params, conn_wrapper) {
   console.log("Server: JOIN");
 
   if (params.length > 1) {
@@ -334,7 +336,7 @@ myEmitter.on('JOIN', function(params, conn_wrapper) {
   }
 });
 
-myEmitter.on('REMATCH', (params, conn_wrapper) => {
+b_emit.on('REMATCH', (params, conn_wrapper) => {
   let instance_name = conn_wrapper.game;
   let rematch_count = 0;
   let instance = game_instances[instance_name];
@@ -372,7 +374,7 @@ myEmitter.on('REMATCH', (params, conn_wrapper) => {
   }
 });
 
-myEmitter.on('GUESS', (params, conn_wrapper) => {
+b_emit.on('GUESS', (params, conn_wrapper) => {
   let instance = game_instances[conn_wrapper.game];
   let location = params[0];
   let player = conn_wrapper;
@@ -406,9 +408,11 @@ myEmitter.on('GUESS', (params, conn_wrapper) => {
 
 });
 
-myEmitter.on('CREATE', function(params, conn_wrapper) {
+b_emit.on('CREATE', function(params, conn_wrapper) {
   console.log("Server: Create");
   console.log("Current state", conn_wrapper.state);
+
+  console.log("params", params);
 
   if (params.length > 1) {
     //TODO SEND ERROR
@@ -418,18 +422,20 @@ myEmitter.on('CREATE', function(params, conn_wrapper) {
 
   name = params[0];
 
+  console.log("NAME", name);
+
   if (game_instances[name]) {
     console.log("GAME " + name + " already exists");
     return
   }
 
-  game_instances[name] = [conn_wrapper]
-  conn_wrapper.socket.write("OK CREATE " + name +'\n');
+  game_instances[name] = [conn_wrapper];
+  conn_wrapper.socket.write("OK CREATE " + ':'.concat(name) +'\n');
   conn_wrapper.game = name;
   conn_wrapper.state = 'waiting';
 });
 
-myEmitter.on('QUIT', function(params, conn_wrapper) {
+b_emit.on('QUIT', function(params, conn_wrapper) {
   console.log("Server: QUIT");
   conn_wrapper.socket.destroy()
 });
