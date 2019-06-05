@@ -5,111 +5,42 @@ const server = net.createServer();
 class BattleshipEmitter extends EventEmitter {}
 const b_emit = new BattleshipEmitter();
 
+//Versions supported by server
+const versions = [1.0];
+
+//Load battleshipt application configuration
+//This specifies the size of the grid, what ships to use, etc.
 const config = require("./server-config.json");
-const {users, versions, grid_shape, ships_by_id, ships, guess_map} = config;
+const {users, grid_shape, ships_by_id, ships, guess_map} = config;
+const {clone_grid, validate_sunk, validate_win, validate_placement} = require("./server_helpers.js");
 
-//BEGIN HELPER FUNCTIONS
-function clone_grid(grid) {
-  return JSON.parse(JSON.stringify(grid))
+
+//Contains all valid commands for a given state.
+//Commands that are not contained in the array for a given state are discarded.
+const state_map = {
+  "negotiate_version": ["CONNECT", "QUIT"],
+  "auth_user": ["USER", "QUIT"],
+  "auth_password": ["PASSWORD", "QUIT"],
+  "connected": ["JOIN", "CREATE", "QUIT"],
+  "waiting": ["GQUIT", "QUIT"],
+  "init_game": ["PLACE", "CONFIRM", "GQUIT", "QUIT"],
+  "confirm": ["GQUIT", "QUIT"],
+  "rematch": ["GQUIT", "QUIT"],
+  "play_game": ["GUESS", "GQUIT"],
+  "finish_game": ["REMATCH", "GQUIT", "QUIT"]
 }
 
-function validate_sunk(id, grid) {
-  for (let i=0; i < grid.length; i++) {
-    let row = grid[i];
-    if (row.includes(id)) return false;
-  }
-  return true;
-}
-
-function validate_win(grid) {
-  for (let i = 0; i < grid.length; i++) {
-    let row = grid[i];
-    let pass = row.every(position => position === 0 || position === 'x');
-
-    if (!pass) return false;
-  }
-
-  return true;
-}
-
-function validate_placement(ship_name, location, orientation, conn_wrapper) {
-  let ship = ships[ship_name];
-  let grid = conn_wrapper.grid;
-
-  let positions = [];
-  starting_position = guess_map[location];
-  positions.push(starting_position);
-
-  if (!ship) {
-    console.log("Not a valid ship!");
-    return false;
-  }
-
-  if (starting_position === undefined) {
-    console.log("Invalid starting position!");
-    return false;
-  }
-
-  if (!['v', 'h'].includes(orientation)) {
-    console.log("Not a valid orientation");
-    return false;
-  }
-
-  for (i=0; i < ship.size - 1; i++) {
-    let last_entry = positions[positions.length - 1];
-    let new_entry = [];
-    if (orientation ===  'h') {
-      new_entry = [last_entry[0], last_entry[1] + 1];
-    }
-
-    if (orientation === 'v') {
-      new_entry = [last_entry[0] + 1, last_entry[1]];
-    }
-
-    let [y, x] = new_entry
-
-    if (grid[y][x] === undefined) {
-      return false;
-    }
-    positions.push(new_entry);
-  }
-
-  return positions;
-
-  //TODO REASSIGN TO GRID
-  //for (position of positions) {
-  //  grid[position[0]][position[1]] = ship.id;
-  //}
-
-  console.log("grid", grid);
-}
-//END HELPER FUNCTIONS
-
-
-const commands = ['CONNECT', 'QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS", "USER", "PASSWORD"];
-const states = ['negotiate_version', 'auth_user', 'auth_password', 'connected', 'waiting', 'init_game', 'confirm', 'play_game', 'finish_game', 'rematch'];
-
-let game_instances = {}
-
-server.listen(7999, function() {
-  console.log('server listening to %j', server.address());
-});
-
-server.on('connection', handleConnection);
-
-function executeCommand(command, parameters, conn_wrapper) {
-  if (commands.includes(command)) {
-    b_emit.emit(command, parameters, conn_wrapper)
-  } else {
-    console.log("COMMAND NOT FOUND")
-  }
+//given a connection, which has a state. make sure command is allowable in state using the state map.
+//returns true or false if the command can be executed.
+function validate_state(conn_wrapper, command) {
+  let current_state = conn_wrapper.state;
+  return state_map[current_state] && state_map[current_state].includes(command)
 }
 
 function parseMessage(message) {
-
   let components;
 
-  //process escpaed whitespace
+  //process escpaed whitespace, otherwise split message on space.
   if (message.includes(':')) {
     let ind = message.indexOf(':');
     let esc_param = message.slice(ind + 1, message.length);
@@ -124,6 +55,26 @@ function parseMessage(message) {
   params = components.splice(1, components.length - 1);
   return {command: command, params: params}
 }
+
+function executeCommand(command, parameters, conn_wrapper) {
+  if (commands.includes(command)) {
+    b_emit.emit(command, parameters, conn_wrapper)
+  } else {
+    console.log("COMMAND NOT FOUND");
+    conn_wrapper.socket.write("ERR " + command + " :" + command + " is not a valid command");
+  }
+}
+
+const commands = ['CONNECT', 'QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS", "USER", "PASSWORD"];
+const states = ['negotiate_version', 'auth_user', 'auth_password', 'connected', 'waiting', 'init_game', 'confirm', 'play_game', 'finish_game', 'rematch'];
+
+let game_instances = {}
+
+server.listen(7999, function() {
+  console.log('server listening to %j', server.address());
+});
+
+server.on('connection', handleConnection);
 
 function handleConnection(conn) {
   var client_address = conn.remoteAddress + ':' + conn.remotePort;
@@ -145,8 +96,13 @@ function handleConnection(conn) {
     let messages = data.toString('UTF8').trim().split('\n');
 
     for (let i = 0; i < messages.length; i++) {
-      let {command, params} = parseMessage(messages[i])
-      executeCommand(command, params, conn_wrapper)
+      let {command, params} = parseMessage(messages[i]);
+      let is_allowable = validate_state(conn_wrapper, command);
+      if (is_allowable) {
+        executeCommand(command, params, conn_wrapper)
+      } else {
+        conn_wrapper.socket.write("ERR " + command + " :Current state is not supported for this command")
+      }
     }
   }
 
@@ -171,6 +127,7 @@ b_emit.on('USER', (params, conn_wrapper) => {
   let username = params[0];
   if (username in users) {
     conn_wrapper.username = username;
+    conn_wrapper.state = 'auth_password';
     conn_wrapper.socket.write('OK USER ' + username);
   }
 });
@@ -181,6 +138,7 @@ b_emit.on('PASSWORD', (params, conn_wrapper) => {
 
   if (password === users[username].password) {
     conn_wrapper.socket.write('OK PASSWORD');
+    conn_wrapper.state = 'connected';
   } else {
     conn_wrapper.socket.write('ERR PASSWORD');
   }
@@ -202,7 +160,7 @@ b_emit.on('GQUIT', function(params, conn_wrapper) {
       let other_player = game_instance[0];
       let player = conn_wrapper.username;
 
-      other_player.socket.write("OPP_LEFT " + player);
+      other_player.socket.write("OPP GQUIT " + player + "\n");
       other_player.state = 'waiting';
     }
   }
@@ -218,27 +176,31 @@ b_emit.on('CONNECT', (params, conn_wrapper) => {
   let negotiated_version = Math.max(...supported_versions);
 
   conn_wrapper.socket.write("OK CONNECT " + negotiated_version);
-
+  conn_wrapper.state = 'auth_user';
 });
 
 b_emit.on('PLACE', function(params, conn_wrapper) {
-  let instance_name, ship, loc, orient;
-  [ship, loc, orient] = params;
-  instance_name = conn_wrapper.game;
-  instance = game_instances[instance_name];
+  let [ship_name, loc, orient] = params;
+  let instance_name = conn_wrapper.game;
+  let grid = conn_wrapper.grid;
+  let ship = ships[ship_name]
+  let instance = game_instances[instance_name];
+  let positions = validate_placement(ships, guess_map, ship_name, loc, orient, conn_wrapper);
 
-  valid_placement = validate_placement(ship, loc, orient, conn_wrapper);
-
-  if (!valid_placement) {
+  if (!positions) {
     return conn_wrapper.socket.write("ERR PLACE invalid placement");
+  }
+
+  for (position of positions) {
+    grid[position[0]][position[1]] = ship.id;
   }
 
   instance.forEach(function (wrapper) {
     if (wrapper === conn_wrapper) {
       wrapper.socket.write("OK PLACE\n");
     } else {
-      var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
-      wrapper.socket.write("OPP_PLACE " + remoteAddress);
+      let opponent = conn_wrapper.username;
+      wrapper.socket.write("OPP PLACE " + opponent);
     }
   });
 });
@@ -261,8 +223,8 @@ b_emit.on('CONFIRM', function(params, conn_wrapper) {
     if (confirm_count === 1) {
       instance.forEach(wrapper => {
         if (wrapper !== conn_wrapper) {
-          var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
-          wrapper.socket.write("OPP_CONFIRM " + remoteAddress);
+          let opponent = conn_wrapper.username;
+          wrapper.socket.write("OPP CONFIRM " + opponent + "\n");
         } else {
           conn_wrapper.socket.write("OK CONFIRM")
         }
@@ -276,6 +238,7 @@ b_emit.on('CONFIRM', function(params, conn_wrapper) {
       });
     }
   } else {
+    //TODO ERROR
     console.log("Game does not exist");
   }
 });
@@ -285,9 +248,8 @@ b_emit.on('JOIN', function(params, conn_wrapper) {
 
   if (params.length > 1) {
     //TODO SEND ERROR
-    console.log("Too many parameters");
-    conn_wrapper.socket.write("ERR JOIN");
-    return
+    let reason = ":Too many parameters";
+    return conn_wrapper.socket.write("ERR JOIN " + reason + "\n");
   }
 
   name = params[0]
@@ -306,13 +268,13 @@ b_emit.on('JOIN', function(params, conn_wrapper) {
       if (wrapper !== conn_wrapper) {
         //var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
         let opponent_name = conn_wrapper.username;
-        wrapper.socket.write("OPP_JOINED " + opponent_name);
+        wrapper.socket.write("OPP JOIN " + opponent_name + '\n');
       }
     });
 
   } else {
-    console.log("Game does not exist");
-    conn_wrapper.socket.write("ERR JOIN");
+    let reason = ":Game \'" + name + "\' does not exist";
+    conn_wrapper.socket.write("ERR JOIN " + reason + "\n");
   }
 });
 
@@ -334,8 +296,8 @@ b_emit.on('REMATCH', (params, conn_wrapper) => {
     if (rematch_count === 1) {
       instance.forEach(wrapper => {
         if (wrapper !== conn_wrapper) {
-          var remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
-          wrapper.socket.write("OPP_REMATCH " + remoteAddress);
+          let opponent = conn_wrapper.username;
+          wrapper.socket.write("OPP REMATCH " + username + "\n");
         } else {
           conn_wrapper.socket.write("OK REMATCH")
         }
@@ -372,8 +334,10 @@ b_emit.on('GUESS', (params, conn_wrapper) => {
       let win_condition = validate_win(opponent.grid);
 
       if (win_condition) {
-        player.socket.write("WINNER " + "Bill");
-        opponent.socket.write("WINNER " + "Bill");
+        player.socket.write("WINNER " + conn_wrapper.username + "\n");
+        opponent.socket.write("WINNER " + conn_wrapper.username + "\n");
+        player.state = 'finish_game';
+        opponent.state = 'finish_game';
       } else {
         player.socket.write("SUNK " + ships_by_id[ship_id]);
       }
@@ -385,26 +349,19 @@ b_emit.on('GUESS', (params, conn_wrapper) => {
   } else {
     player.socket.write("MISS " + location);
   }
-
 });
 
 b_emit.on('CREATE', function(params, conn_wrapper) {
   console.log("Server: Create");
-  console.log("Current state", conn_wrapper.state);
-
-  console.log("params", params);
-
   if (params.length > 1) {
-    //TODO SEND ERROR
     console.log("Too many parameters");
-    return
+    return conn_wrapper.socket.write('ERR CREATE :Too many parameters\n')
   }
 
   name = params[0];
 
   if (game_instances[name]) {
     let reason = "Game: \'" + name + "\' already exists";
-    console.log(reason);
     return conn_wrapper.socket.write("ERR CREATE " + ':'.concat(reason));
   }
 
@@ -415,6 +372,5 @@ b_emit.on('CREATE', function(params, conn_wrapper) {
 });
 
 b_emit.on('QUIT', function(params, conn_wrapper) {
-  console.log("Server: QUIT");
   conn_wrapper.socket.destroy()
 });

@@ -3,13 +3,22 @@
     "foo": {"password": "password"},
     "bar": {"password": "password"}
   },
-  "versions": [1.0],
   "grid_shape": [[0, 0, 0],
                  [0, 0, 0],
                  [0, 0, 0]],
-  "ships_by_id": {"5": "destroyer"},
+  "ships_by_id": {
+    "5": "destroyer",
+    "4": "submatine"
+  },
   "ships": {
-    "destroyer": {"size": 2}
+    "destroyer": {
+      "size": 2,
+      "id": 5
+    },
+    "submarine": {
+      "size": 3,
+      "id": 4
+    }
   },
   "guess_map": {
     "a1": [0, 0],

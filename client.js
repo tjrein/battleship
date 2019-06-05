@@ -1,14 +1,19 @@
 const net = require('net');
 const EventEmitter = require('events');
+const commands = ['OK', 'ERR', 'OPP', 'BEGIN', 'REINIT', 'HIT', 'MISS', 'SUNK', 'WINNER'];
 
 let version = 1.0;
-
 let message = '';
 let game_name = '';
 let current_message_component = 'command';
 let current_state = 'disconnected';
 
-const commands = ['OK', 'ERR', 'OPP_JOINED', 'OPP_LEFT', 'OPP_PLACE', 'OPP_CONFIRM', 'OPP_REMATCH', 'BEGIN', 'REINIT', 'HIT', 'MISS', 'SUNK', 'WINNER'];
+const config = require("./server-config.json");
+const {grid_shape, ships_by_id, ships, guess_map} = config;
+
+for (row of grid_shape) {
+  console.log(row);
+}
 
 class BattleshipEmitter extends EventEmitter {}
 const b_emit = new BattleshipEmitter();
@@ -27,7 +32,52 @@ if (args.length) {
 
 const socket = net.createConnection({ port: 7999, host: host });
 
+const state_map = {
+  'negotiate_version': ['OK', 'ERR'],
+  'auth_user': ['OK', 'ERR'],
+  'auth_password': ['OK', 'ERR'],
+  'connected': ['OK', 'ERR'],
+  'waiting': ['OK', 'ERR', 'OPP'],
+  'init_game': ['BEGIN', 'OK', 'ERR', 'OPP'],
+  'confirm': ['BEGIN', 'OK', 'ERR', 'OPP'],
+  'play_game': ['HIT', 'MISS', 'SUNK', 'WINNER', 'OK', 'ERR', 'OPP'],
+  'finish_game': ['REINIT', 'OK', 'ERR', 'OPP'],
+  'rematch': ['REINIT', 'OK', 'ERR', 'OPP']
+}
+
+function validate_state(current_state, command) {
+  return state_map[current_state] && state_map[current_state].includes(command)
+}
+
+function executeCommand(command, parameters) {
+  if (commands.includes(command)) {
+    b_emit.emit(command, parameters)
+  } else {
+    console.log("COMMAND NOT FOUND");
+  }
+}
+
+function parseMessage(message) {
+  let components;
+
+  //process escpaed whitespace
+  if (message.includes(':')) {
+    let ind = message.indexOf(':');
+    let esc_param = message.slice(ind + 1, message.length);
+    let upto_esc = message.slice(0, ind - 1);
+    components = upto_esc.split(" ");
+    components.push(esc_param);
+  } else {
+    components = message.split(" ");
+  }
+
+  let command = components[0]
+  let params = components.splice(1, components.length - 1)
+  return {command: command, params: params}
+}
+
 //this object keeps track of what inputs can be entered by the client in a particular state
+//helps map user inputs to appropriate commands and parameters where applicable
 const inputs_for_state = {
   'auth_user': {
     '1': {'command': 'USER', 'parameters': ['username']},
@@ -53,7 +103,7 @@ const inputs_for_state = {
     '1': {'command': 'GQUIT', 'parameters': [] }
   },
   'play_game': {
-    '1': {'command': 'GUESS', 'parameters': ['grid_location'] },
+    '1': {'command': 'GUESS', 'parameters': ['grid location'] },
     '2': {'command': 'GQUIT', 'parameters': [] }
   },
   'finish_game': {
@@ -138,14 +188,12 @@ readline.on('line', input => {
   }
 
   if (current_message_component === 'parameters') {
-    //escape space characters for JOIN and CREATE
-    //Message at this point will just the command
+    //escape space characters for JOIN and CREATE so clients can create games with multiple words
+    //Message at this point will be just the command
     let command = message;
     if (command === 'CREATE ' || command === 'JOIN ') {
       input = ':'.concat(input);
     }
-
-    console.log("input", input);
 
     message += input + '\n';
     socket.write(message);
@@ -177,6 +225,7 @@ function prompt(current_state) {
 }
 
 
+//SOCKET CONNECTION LIISTENER
 socket.on('connect', () => {
   current_state = 'negotiate_version';
 
@@ -187,55 +236,28 @@ socket.on('connect', () => {
     let messages = data.toString('UTF8').trim().split('\n');
 
     for (let i = 0; i < messages.length; i++) {
-      let {command, params} = parseMessage(messages[i])
-      executeCommand(command, params)
+      let {command, params} = parseMessage(messages[i]);
+      let is_allowable = validate_state(current_state, command);
+      if (is_allowable) {
+        executeCommand(command, params);
+      } else {
+        console.log("STATE ERROR", current_state);
+      }
     }
-
   });
 
   socket.on('close', data => {
     process.exit(-1);
   })
-
 });
 
-function executeCommand(command, parameters) {
-  if (commands.includes(command)) {
-    b_emit.emit(command, parameters)
-  } else {
-    console.log("COMMAND NOT FOUND");
-  }
-}
-
-function parseMessage(message) {
-  let components;
-
-  //process escpaed whitespace
-  if (message.includes(':')) {
-    let ind = message.indexOf(':');
-    let esc_param = message.slice(ind + 1, message.length);
-    let upto_esc = message.slice(0, ind - 1);
-    components = upto_esc.split(" ");
-    components.push(esc_param);
-  } else {
-    components = message.split(" ");
-  }
-
-  let command = components[0]
-  let params = components.splice(1, components.length - 1)
-  return {command: command, params: params}
-}
-
-//BEGIN EVENT LISTENERS
+//BEGIN PROTOCOL SPECIFIC LISTENERS
 /*
   These functions listen for messages from the server
   Primarily Update client state and prompt for additonal input depending on state.
 */
 b_emit.on('OK', function(params) {
-  console.log("PARAMS", params);
-
   let successful_command = params[0];
-
   if (successful_command === 'CONNECT') {
     version = params[1];
     current_state = 'auth_user';
@@ -280,21 +302,37 @@ b_emit.on('OK', function(params) {
 b_emit.on('ERR', params => {
   let failed_command = params[0];
   let reason = params[1];
-
-  if (failed_command === 'PASSWORD') {
-    console.log("\nInvalid Password!");
-  }
-
-  if (failed_command === 'PLACE') {
-    console.log("\nInvalid placement!");
-  }
-
-  if (failed_command === 'CREATE') {
-    console.log("\n" + reason);
-  }
-
+  console.log("\n" + reason);
   prompt(current_state);
-})
+});
+
+b_emit.on('OPP', params => {
+  let opponent_command = params[0]
+  let opp = params[1];
+
+  if (opponent_command === 'JOIN') {
+    console.log("\n");
+    console.log(opp + ' has joined the game!');
+    current_state = 'init_game';
+    prompt(current_state);
+  }
+
+  if (opponent_command === 'GQUIT') {
+    console.log("\n");
+    console.log(opp + ' has left the game!');
+    current_state = 'waiting';
+    prompt(current_state);
+  }
+
+  if (opponent_command === 'PLACE') {
+    console_out(opp + ' placed a ship\n');
+  }
+
+  if (opponent_command === 'CONFIRM') {
+    console_out(opp + ' confirmed ships, and is ready to play!');
+  }
+
+});
 
 b_emit.on('WINNER', (params) => {
   let player = params[0];
@@ -331,34 +369,4 @@ b_emit.on('BEGIN', () => {
   prompt(current_state);
 });
 
-b_emit.on('OPP_PLACE', params => {
-  let opp = params[0];
-  console_out(opp + ' placed a ship\n');
-});
-
-b_emit.on('OPP_LEFT', params => {
-  let opp = params[0];
-  console.log("\n");
-  console.log(opp + ' has left the game!');
-  current_state = 'waiting';
-  prompt(current_state);
-});
-
-b_emit.on('OPP_REMATCH', params => {
-  let opp = params[0];
-  console_out(opp + ' wants a rematch!\n');
-});
-
-b_emit.on('OPP_JOINED', params => {
-  let opp = params[0];
-  console.log("\n");
-  console.log(opp + ' has joined the game!');
-  current_state = 'init_game';
-  prompt(current_state);
-});
-
-b_emit.on('OPP_CONFIRM', params => {
-  let opp = params[0];
-  console_out(opp + ' confirmed ships, and is ready to play!');
-});
 //END EVENT LISTENERS
