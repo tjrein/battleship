@@ -5,25 +5,26 @@ const server = net.createServer();
 class MyEmitter extends EventEmitter {}
 const myEmitter = new MyEmitter();
 
+//TODO NEGOTIATE version
+//TODO validate commands and state
+//TODO refactor
+
+//BEGIN CONFIG
 const users = {
   "foo": {'password': 'password'},
   "bar": {'password': 'password'}
 }
-
-const version = 1.0;
+const versions = [1.0];
 
 const grid_shape = [ [0, 0, 0],
                      [0, 0, 0],
                      [0, 0, 0] ]
-
 const ships_by_id = {
   5: 'destroyer'
 }
-
 const ships =  {
   'destroyer': {size: 2, id: 5}
 }
-
 const guess_map = {
   'a1': [0, 0],
   'b1': [0, 1],
@@ -35,7 +36,9 @@ const guess_map = {
   'b3': [2, 1],
   'c3': [2, 2],
 }
+//END CONFIG
 
+//BEGIN HELPER FUNCTIONS
 function clone_grid(grid) {
   return JSON.parse(JSON.stringify(grid))
 }
@@ -60,8 +63,6 @@ function validate_win(grid) {
 }
 
 function validate_placement(ship_name, location, orientation, conn_wrapper) {
-  //TODO MORE VALIDATION
-
   let ship = ships[ship_name];
   let grid = conn_wrapper.grid;
 
@@ -71,10 +72,21 @@ function validate_placement(ship_name, location, orientation, conn_wrapper) {
 
   if (!ship) {
     console.log("Not a valid ship!");
-    return false
+    return false;
+  }
+
+  if (starting_position === undefined) {
+    console.log("Invalid starting position!");
+    return false;
+  }
+
+  if (!['v', 'h'].includes(orientation)) {
+    console.log("Not a valid orientation");
+    return false;
   }
 
   for (i=0; i < ship.size - 1; i++) {
+    console.log("HEy");
     let last_entry = positions[positions.length - 1];
     let new_entry = [];
     if (orientation ===  'h') {
@@ -84,19 +96,29 @@ function validate_placement(ship_name, location, orientation, conn_wrapper) {
     if (orientation === 'v') {
       new_entry = [last_entry[0] + 1, last_entry[1]];
     }
+
+    let [y, x] = new_entry
+
+    if (grid[y][x] === undefined) {
+      return false;
+    }
     positions.push(new_entry);
   }
 
-  for (position of positions) {
-    grid[position[0]][position[1]] = ship.id;
-  }
+  return positions;
+
+  //TODO REASSIGN TO GRID
+  //for (position of positions) {
+  //  grid[position[0]][position[1]] = ship.id;
+  //}
 
   console.log("grid", grid);
 }
+//END HELPER FUNCTIONS
 
 
-const commands = ['QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS", "USER", "PASSWORD"];
-const states = ['auth_user', 'auth_password', 'set_nick', 'connected', 'waiting', 'init_game', 'confirm', 'play_game'];
+const commands = ['CONNECT', 'QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS", "USER", "PASSWORD"];
+const states = ['negotiate_version', 'auth_user', 'auth_password', 'connected', 'waiting', 'init_game', 'confirm', 'play_game', 'finish_game', 'rematch'];
 
 let game_instances = {}
 
@@ -118,30 +140,27 @@ function parseMessage(message) {
   components = message.split(' ')
   command = components[0]
   params = components.splice(1, components.length - 1)
-
   return {command: command, params: params}
 }
 
 function handleConnection(conn) {
-
   var client_address = conn.remoteAddress + ':' + conn.remotePort;
   conn.on('data', onConnData);
   conn.once('close', onConnClose);
   conn.on('error', onConnError);
-
   console.log("Client connected: ", client_address);
 
   let conn_wrapper = {
     socket: conn,
-    state: 'auth_user',
+    state: 'negotiate_version',
     username: null,
     game: null,
-    grid: JSON.parse(JSON.stringify(grid_shape)) //deep clone grid,
+    grid: clone_grid(grid_shape) //deep clone grid,
   }
 
   function onConnData(data) {
     console.log('connection data from %s: %j', client_address, data);
-    messages = data.toString('UTF8').trim().split('\n');
+    let messages = data.toString('UTF8').trim().split('\n');
 
     for (let i = 0; i < messages.length; i++) {
       let {command, params} = parseMessage(messages[i])
@@ -167,7 +186,6 @@ function cleanupInstance(instance_name) {
 }
 
 myEmitter.on('USER', (params, conn_wrapper) => {
-  console.log("SHIT")
   let username = params[0];
   if (username in users) {
     conn_wrapper.username = username;
@@ -200,7 +218,6 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
 
     if (game_instance.length) {
       let other_player = game_instance[0];
-      //let remoteAddress = conn_wrapper.socket.remoteAddress + ':' + conn_wrapper.socket.remotePort;
       let player = conn_wrapper.username;
 
       other_player.socket.write("OPP_LEFT " + player);
@@ -211,13 +228,28 @@ myEmitter.on('GQUIT', function(params, conn_wrapper) {
   cleanupInstance(instance_name)
 });
 
+myEmitter.on('CONNECT', (params, conn_wrapper) => {
+  let [desired_version] = params;
+
+  //Get all versions upto client requested version and select the highest one.
+  let supported_versions = versions.filter(version => version <= desired_version);
+  let negotiated_version = Math.max(...supported_versions);
+
+  conn_wrapper.socket.write("OK CONNECT " + negotiated_version);
+
+});
+
 myEmitter.on('PLACE', function(params, conn_wrapper) {
   let instance_name, ship, loc, orient;
   [ship, loc, orient] = params;
   instance_name = conn_wrapper.game;
   instance = game_instances[instance_name];
 
-  validate_placement(ship, loc, orient, conn_wrapper)
+  valid_placement = validate_placement(ship, loc, orient, conn_wrapper);
+
+  if (!valid_placement) {
+    return conn_wrapper.socket.write("ERR PLACE invalid placement");
+  }
 
   instance.forEach(function (wrapper) {
     if (wrapper === conn_wrapper) {
@@ -384,7 +416,7 @@ myEmitter.on('CREATE', function(params, conn_wrapper) {
     return
   }
 
-  name = params[0]
+  name = params[0];
 
   if (game_instances[name]) {
     console.log("GAME " + name + " already exists");

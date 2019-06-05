@@ -1,8 +1,7 @@
 const net = require('net');
 const EventEmitter = require('events');
-var keypress = require('keypress');
 
-const version = 1.0;
+let version = 1.0;
 
 let message = '';
 let game_name = '';
@@ -19,10 +18,12 @@ const socket = net.createConnection({ port: 9000, host: 'localhost' });
 //this object keeps track of what inputs can be entered by the client in a particular state
 const inputs_for_state = {
   'auth_user': {
-    '1': {'command': 'USER', 'parameters': ['username']}
+    '1': {'command': 'USER', 'parameters': ['username']},
+    '2': {'command': 'QUIT', 'parameters': []}
   },
   'auth_password': {
-    '1': {'command': 'PASSWORD', 'parameters': ['password']}
+    '1': {'command': 'PASSWORD', 'parameters': ['password']},
+    '2': {'command': 'QUIT', 'parameters': []}
   },
   'connected': {
     '1': {'command': 'CREATE', 'parameters': ['name']},
@@ -32,7 +33,7 @@ const inputs_for_state = {
     '1': {'command': 'GQUIT', 'parameters': [] }
   },
   'init_game': {
-    '1': {'command': 'PLACE', 'parameters': ['ship', 'grid_location', 'orientation']},
+    '1': {'command': 'PLACE', 'parameters': ['ship', 'grid location', 'orientation']},
     '2': {'command': 'CONFIRM', 'parameters': []},
     '3': {'command': 'GQUIT', 'parameters': []}
   },
@@ -66,8 +67,8 @@ function prompt_string(current_state) {
 
   //This instantiates options depending on what the current_state is.
   options = {
-    "auth_user": "1) Enter Username \n",
-    "auth_password": "1) Enter Password \n",
+    "auth_user": "1) Enter Username\n2) Exit\n",
+    "auth_password": "1) Enter Password\n2) Exit\n",
     "connected": "1) Create Game\n2) Join Game\n",
     "waiting": "1) Leave Game\n",
     "init_game": "1) Place ship\n2) Confirm Ship Placements\n3) Leave Game\n",
@@ -80,7 +81,7 @@ function prompt_string(current_state) {
   return test + options
 }
 
-
+//initialize CLI
 const readline = require('readline').createInterface({
   input: process.stdin,
   output: process.stdout,
@@ -92,7 +93,7 @@ function parameter_prompt(parameters) {
   readline.setPrompt('\nEnter the following parameters (space separated): ' + param_string + '\n\n> ');
   readline.prompt();
 
-  //Somewhat hacky. Node is async, and this ensures proper execution order
+  //Somewhat hacky. Node is async, and this ensures proper execution order for message construction.
   setTimeout(() => {
     current_message_component = 'parameters';
   }, 0)
@@ -156,9 +157,12 @@ function prompt(current_state) {
 
 
 socket.on('connect', () => {
-  current_state = 'auth_user';
+  current_state = 'negotiate_version';
 
-  prompt(current_state);
+  //send CONNECT message for version negotiation
+  socket.write('CONNECT ' + version + "\n");
+
+  //prompt(current_state);
 
   socket.on('data', data => {
     let messages = data.toString('UTF8').trim().split('\n');
@@ -180,7 +184,7 @@ function executeCommand(command, parameters) {
   if (commands.includes(command)) {
     myEmitter.emit(command, parameters)
   } else {
-    console.log("COMMAND NOT FOUND")
+    console.log("COMMAND NOT FOUND");
   }
 }
 
@@ -191,8 +195,18 @@ function parseMessage(message) {
   return {command: command, params: params}
 }
 
+//BEGIN EVENT LISTENERS
+/*
+  These functions listen for messages from the server
+  Primarily Update client state and prompt for additonal input depending on state.
+*/
 myEmitter.on('OK', function(params) {
   let successful_command = params[0];
+
+  if (successful_command === 'CONNECT') {
+    version = params[1];
+    current_state = 'auth_user';
+  }
 
   if (successful_command === 'USER') {
     current_state = 'auth_password';
@@ -227,16 +241,19 @@ myEmitter.on('OK', function(params) {
   if (successful_command === 'REMATCH') {
     current_state = 'rematch';
   }
-
   prompt(current_state);
-
 });
 
 myEmitter.on('ERR', params => {
   let failed_command = params[0];
+  let reason = params[1];
 
   if (failed_command === 'PASSWORD') {
     console.log("\nInvalid Password!");
+  }
+
+  if (failed_command === 'PLACE') {
+    console.log("\nInvalid placement!");
   }
 
   prompt(current_state);
@@ -307,3 +324,4 @@ myEmitter.on('OPP_CONFIRM', params => {
   let opp = params[0];
   console_out(opp + ' confirmed ships, and is ready to play!');
 });
+//END EVENT LISTENERS
