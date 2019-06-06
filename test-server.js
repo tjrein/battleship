@@ -76,6 +76,9 @@ server.listen(7999, function() {
   console.log('server listening to %j', server.address());
 });
 
+//CONCURRENT
+//bind event listenters to sockets as they connect.
+//wraps sockets in an object with additional protocol information.
 server.on('connection', handleConnection);
 
 function handleConnection(conn) {
@@ -119,7 +122,7 @@ function handleConnection(conn) {
 
 function cleanupInstance(instance_name) {
   //If no clients are in an instance, delete it
-  if (game_instances[instance_name].length === 0) {
+  if (game_instances[instance_name].wrappers.length === 0) {
     console.log("Removing Game Instance: ", instance_name);
     delete game_instances[instance_name]
   }
@@ -149,17 +152,17 @@ b_emit.on('PASSWORD', (params, conn_wrapper) => {
 b_emit.on('GQUIT', function(params, conn_wrapper) {
   let instance_name = conn_wrapper.game;
   let game_instance = game_instances[instance_name]
-  let index = game_instance.indexOf(conn_wrapper)
+  let index = game_instance.wrappers.indexOf(conn_wrapper)
 
   if (index > -1) {
-    game_instance.splice(index, 1);
+    game_instance.wrappers.splice(index, 1);
     conn_wrapper.socket.write("OK GQUIT " + instance_name);
     conn_wrapper.state = 'connected';
     conn_wrapper.game = null;
-    conn_wrapper.grid = JSON.parse(JSON.stringify(grid_shape))
+    conn_wrapper.grid = clone_grid(grid_shape);
 
-    if (game_instance.length) {
-      let other_player = game_instance[0];
+    if (game_instance.wrappers.length) {
+      let other_player = game_instance.wrappers[0];
       let player = conn_wrapper.username;
 
       other_player.socket.write("OPP GQUIT " + player + "\n");
@@ -213,7 +216,7 @@ b_emit.on('PLACE', function(params, conn_wrapper) {
   //format converted_positions into a messaage parameter
   let place_parameter = ':'.concat(converted_positions.join(' '));
 
-  instance.forEach(function (wrapper) {
+  instance.wrappers.forEach(function (wrapper) {
     if (wrapper === conn_wrapper) {
       wrapper.socket.write("OK PLACE " + ship_name + ' ' + place_parameter + "\n");
     } else {
@@ -229,17 +232,16 @@ b_emit.on('CONFIRM', function(params, conn_wrapper) {
   let instance = game_instances[instance_name];
 
   if (instance) {
-    //conn_wrapper.socket.write("OK CONFIRM");
     conn_wrapper.state = 'confirm';
 
-    instance.forEach(wrapper => {
+    instance.wrappers.forEach(wrapper => {
       if (wrapper.state === 'confirm') {
         confirm_count += 1;
       }
     });
 
     if (confirm_count === 1) {
-      instance.forEach(wrapper => {
+      instance.wrappers.forEach(wrapper => {
         if (wrapper !== conn_wrapper) {
           let opponent = conn_wrapper.username;
           wrapper.socket.write("OPP CONFIRM " + opponent + "\n");
@@ -250,14 +252,19 @@ b_emit.on('CONFIRM', function(params, conn_wrapper) {
     }
 
     if (confirm_count === 2) {
-      instance.forEach(function (wrapper) {
+      let rand_ind = Math.round(Math.random());
+      let goes_first = instance.wrappers[rand_ind].username;
+
+
+      instance.wrappers.forEach(function (wrapper) {
         wrapper.state = 'play_game';
-        wrapper.socket.write("BEGIN");
+        wrapper.socket.write("BEGIN " + goes_first + "\n");
       });
     }
   } else {
     //TODO ERROR
     console.log("Game does not exist");
+    conn_wrapper.socket.write("ERR CONFIRM :Game does not exist");
   }
 });
 
@@ -277,9 +284,9 @@ b_emit.on('JOIN', function(params, conn_wrapper) {
     conn_wrapper.state = 'init_game';
     conn_wrapper.game = name;
 
-    game_instances[name].push(conn_wrapper);
+    game_instances[name].wrappers.push(conn_wrapper);
 
-    game_instances[name].forEach(wrapper => {
+    game_instances[name].wrappers.forEach(wrapper => {
       wrapper.state = 'init_game';
 
       //let other player know the game has been joined
@@ -305,14 +312,14 @@ b_emit.on('REMATCH', (params, conn_wrapper) => {
     //conn_wrapper.socket.write("OK CONFIRM");
     conn_wrapper.state = 'rematch';
 
-    instance.forEach(wrapper => {
+    instance.wrappers.forEach(wrapper => {
       if (wrapper.state === 'rematch') {
         rematch_count += 1;
       }
     });
 
     if (rematch_count === 1) {
-      instance.forEach(wrapper => {
+      instance.wrappers.forEach(wrapper => {
         if (wrapper !== conn_wrapper) {
           let opponent = conn_wrapper.username;
           wrapper.socket.write("OPP REMATCH " + username + "\n");
@@ -338,7 +345,7 @@ b_emit.on('GUESS', (params, conn_wrapper) => {
   let instance = game_instances[conn_wrapper.game];
   let location = params[0];
   let player = conn_wrapper;
-  let opponent = instance.filter(wrapper => wrapper !== conn_wrapper)[0];
+  let opponent = instance.wrappers.filter(wrapper => wrapper !== conn_wrapper)[0];
 
   let [y, x] = guess_map[location];
 
@@ -383,7 +390,7 @@ b_emit.on('CREATE', function(params, conn_wrapper) {
     return conn_wrapper.socket.write("ERR CREATE " + ':'.concat(reason));
   }
 
-  game_instances[name] = [conn_wrapper];
+  game_instances[name] = { wrappers: [conn_wrapper], turn: null };
   conn_wrapper.socket.write("OK CREATE " + ':'.concat(name) +'\n');
   conn_wrapper.game = name;
   conn_wrapper.state = 'waiting';

@@ -5,8 +5,11 @@ const commands = ['OK', 'ERR', 'OPP', 'BEGIN', 'REINIT', 'HIT', 'MISS', 'SUNK', 
 let version = 1.0;
 let message = '';
 let game_name = '';
+let useranem = '';
 let current_message_component = 'command';
 let current_state = 'disconnected';
+
+//TODO RESET GRID
 
 const config = require("./server-config.json");
 const {grid_shape, ships_by_id, ships, guess_map} = config;
@@ -18,7 +21,10 @@ let opp_grid = clone_grid(grid_shape);
 class BattleshipEmitter extends EventEmitter {}
 const b_emit = new BattleshipEmitter();
 
-//Process host passed from client on command line
+/*
+CLIENT
+Process host/ip address passed from client on command line
+*/
 let host = 'localhost'; //default to localhost
 const args = process.argv.slice(2);
 if (args.length) {
@@ -30,8 +36,11 @@ if (args.length) {
   }
 }
 
+//SERVICE
+//client defaults to port number
 const socket = net.createConnection({ port: 7999, host: host });
 
+//STATEFUL
 const state_map = {
   'negotiate_version': ['OK', 'ERR'],
   'auth_user': ['OK', 'ERR'],
@@ -51,6 +60,7 @@ function render_grid(grid) {
   }
 }
 
+//STATEFUL
 function validate_state(current_state, command) {
   return state_map[current_state] && state_map[current_state].includes(command)
 }
@@ -281,6 +291,7 @@ b_emit.on('OK', function(params) {
 
   if (successful_command === 'USER') {
     current_state = 'auth_password';
+    username = params[1];
   }
 
   if (successful_command === 'PASSWORD') {
@@ -294,6 +305,8 @@ b_emit.on('OK', function(params) {
 
   if (successful_command === 'GQUIT') {
     current_state = "connected";
+    own_grid = clone_grid(grid_shape);
+    opp_grid = clone_grid(grid_shape);
   }
 
   if (successful_command === 'JOIN') {
@@ -353,6 +366,8 @@ b_emit.on('OPP', params => {
     console.log("\n");
     console.log(opp + ' has left the game!');
     current_state = 'waiting';
+    own_grid = clone_grid(grid_shape);
+    opp_grid = clone_grid(grid_shape);
     prompt(current_state);
   }
 
