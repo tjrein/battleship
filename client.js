@@ -13,6 +13,7 @@ const {grid_shape, ships_by_id, ships, guess_map} = config;
 const {clone_grid} = require('./server_helpers.js');
 
 let own_grid = clone_grid(grid_shape);
+let opp_grid = clone_grid(grid_shape);
 
 class BattleshipEmitter extends EventEmitter {}
 const b_emit = new BattleshipEmitter();
@@ -42,6 +43,12 @@ const state_map = {
   'play_game': ['HIT', 'MISS', 'SUNK', 'WINNER', 'OK', 'ERR', 'OPP'],
   'finish_game': ['REINIT', 'OK', 'ERR', 'OPP'],
   'rematch': ['REINIT', 'OK', 'ERR', 'OPP']
+}
+
+function render_grid(grid) {
+  for (row of grid) {
+    console.log(row.join(' '));
+  }
 }
 
 function validate_state(current_state, command) {
@@ -220,10 +227,12 @@ function prompt(current_state) {
 
   if (current_state === 'init_game') {
     console.log('In Game: ' + game_name +"\n");
+    render_grid(own_grid);
+  }
 
-    for (row of own_grid) {
-      console.log(row);
-    }
+  if (current_state === 'play_game') {
+    console.log('In Game: ' + game_name +"\n");
+    render_grid(opp_grid);
   }
 
   console.log(prompt_string(current_state));
@@ -366,18 +375,25 @@ b_emit.on('WINNER', (params) => {
 
 b_emit.on('SUNK', (params) => {
   let ship = params[0];
+  let location = params[1];
   console.log("\nYou sunk the " + ship + "!");
   prompt(current_state);
 })
 
 b_emit.on('HIT', (params) => {
   let location = params[0];
+  let [y, x] = guess_map[location];
+  opp_grid[y][x] = 'x';
+
   console.log("\nHit " + location + "!");
   prompt(current_state);
 });
 
 b_emit.on('MISS', (params) => {
   let location = params[0];
+  let [y, x] = guess_map[location];
+  opp_grid[y][x] = 'o';
+
   console.log("\nMiss " + location + "!");
   prompt(current_state);
 });

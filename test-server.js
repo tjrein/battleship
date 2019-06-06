@@ -357,15 +357,15 @@ b_emit.on('GUESS', (params, conn_wrapper) => {
         player.state = 'finish_game';
         opponent.state = 'finish_game';
       } else {
-        player.socket.write("SUNK " + ships_by_id[ship_id]);
+        player.socket.write("SUNK " + ships_by_id[ship_id] + ' ' + location + '\n');
       }
 
     } else {
-      player.socket.write("HIT " + location);
+      player.socket.write("HIT " + location + "\n");
     }
 
   } else {
-    player.socket.write("MISS " + location);
+    player.socket.write("MISS " + location + "\n");
   }
 });
 
