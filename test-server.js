@@ -14,7 +14,7 @@ const config = require("./server-config.json");
 const {users, grid_shape, ships_by_id, ships, guess_map} = config;
 
 //load helper functions that help play battleship
-const {clone_grid, validate_sunk, validate_win, validate_placement} = require("./server_helpers.js");
+const {clone_grid, validate_sunk, validate_win, validate_placement, convert_position} = require("./server_helpers.js");
 
 
 //Contains all valid commands for a given state.
@@ -190,7 +190,7 @@ b_emit.on('PLACE', function(params, conn_wrapper) {
   let positions = validate_placement(ships, guess_map, ship_name, loc, orient, conn_wrapper);
 
   if (!positions) {
-    return conn_wrapper.socket.write("ERR PLACE invalid placement");
+    return conn_wrapper.socket.write("ERR PLACE :invalid placement");
   }
 
   //if this ship has been already placed previously,
@@ -202,17 +202,20 @@ b_emit.on('PLACE', function(params, conn_wrapper) {
     }
   }
 
+  //place piece on grid according to positions, represented by id
+  //populate arrayw ith human readble grid positions
+  let converted_positions = [];
   for (position of positions) {
     grid[position[0]][position[1]] = ship.id;
+    converted_positions.push(convert_position(guess_map, position));
   }
 
-  for (row of grid) {
-    console.log(row);
-  }
+  //format converted_positions into a messaage parameter
+  let place_parameter = ':'.concat(converted_positions.join(' '));
 
   instance.forEach(function (wrapper) {
     if (wrapper === conn_wrapper) {
-      wrapper.socket.write("OK PLACE\n");
+      wrapper.socket.write("OK PLACE " + ship_name + ' ' + place_parameter + "\n");
     } else {
       let opponent = conn_wrapper.username;
       wrapper.socket.write("OPP PLACE " + opponent);
@@ -270,7 +273,7 @@ b_emit.on('JOIN', function(params, conn_wrapper) {
   name = params[0]
 
   if (game_instances[name]) {
-    conn_wrapper.socket.write("OK JOIN " + name + '\n');
+    conn_wrapper.socket.write("OK JOIN " + ':'.concat(name) + '\n');
     conn_wrapper.state = 'init_game';
     conn_wrapper.game = name;
 

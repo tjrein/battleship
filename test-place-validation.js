@@ -65,8 +65,21 @@ for (row of grid) {
   }
 }
 
+let converted_positions = [];
 for (position of positions) {
   grid[position[0]][position[1]] = ship.id;
+  converted_positions.push(convert_position(guess_map, position))
 }
 
-console.log("grid", grid)
+let place_param = ':'.concat(converted_positions.join(' '));
+
+
+let test = Object.keys(guess_map);
+
+let new_test = test.find(key => guess_map[key].join() === positions[0].join());
+
+
+
+function convert_position(guess_map, position) {
+  return Object.keys(guess_map).find(guess => guess_map[guess].join() === position.join());
+}

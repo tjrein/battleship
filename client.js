@@ -10,10 +10,9 @@ let current_state = 'disconnected';
 
 const config = require("./server-config.json");
 const {grid_shape, ships_by_id, ships, guess_map} = config;
+const {clone_grid} = require('./server_helpers.js');
 
-for (row of grid_shape) {
-  console.log(row);
-}
+let own_grid = clone_grid(grid_shape);
 
 class BattleshipEmitter extends EventEmitter {}
 const b_emit = new BattleshipEmitter();
@@ -219,6 +218,14 @@ function prompt(current_state) {
     console.log("Waiting for opponent to confirm ships.");
   }
 
+  if (current_state === 'init_game') {
+    console.log('In Game: ' + game_name +"\n");
+
+    for (row of own_grid) {
+      console.log(row);
+    }
+  }
+
   console.log(prompt_string(current_state));
   readline.setPrompt("> ");
   readline.prompt(true);
@@ -273,7 +280,7 @@ b_emit.on('OK', function(params) {
 
   if (successful_command === 'CREATE') {
     current_state = 'waiting';
-    game_name = params.splice(1, params.length -1 );
+    game_name = params[1];
   }
 
   if (successful_command === 'GQUIT') {
@@ -287,6 +294,22 @@ b_emit.on('OK', function(params) {
 
   if (successful_command === 'PLACE') {
     console.log("\nSuccesfully placed Ship!");
+    let ship_name = params[1];
+    let positions = params[2].split(' ');
+    let ship = ships[ship_name];
+
+    for (row of own_grid) {
+      let ind = row.indexOf(ship.id);
+      if (ind > -1) {
+        row[ind] = 0;
+      }
+    }
+
+    for (position of positions) {
+      let position_inds = guess_map[position];
+      let [y, x] = position_inds;
+      own_grid[y][x] = ship.id;
+    }
   }
 
   if (successful_command === 'CONFIRM') {
@@ -296,7 +319,7 @@ b_emit.on('OK', function(params) {
   if (successful_command === 'REMATCH') {
     current_state = 'rematch';
   }
-  prompt(current_state);
+  prompt(current_state, params);
 });
 
 b_emit.on('ERR', params => {
