@@ -12,6 +12,8 @@ const versions = [1.0];
 //This specifies the size of the grid, what ships to use, etc.
 const config = require("./server-config.json");
 const {users, grid_shape, ships_by_id, ships, guess_map} = config;
+
+//load helper functions that help play battleship
 const {clone_grid, validate_sunk, validate_win, validate_placement} = require("./server_helpers.js");
 
 
@@ -191,8 +193,21 @@ b_emit.on('PLACE', function(params, conn_wrapper) {
     return conn_wrapper.socket.write("ERR PLACE invalid placement");
   }
 
+  //if this ship has been already placed previously,
+  //replace indices with 0.
+  for (row of grid) {
+    let ind = row.indexOf(ship.id);
+    if (ind > -1) {
+      row[ind] = 0;
+    }
+  }
+
   for (position of positions) {
     grid[position[0]][position[1]] = ship.id;
+  }
+
+  for (row of grid) {
+    console.log(row);
   }
 
   instance.forEach(function (wrapper) {

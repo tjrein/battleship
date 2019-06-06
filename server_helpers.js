@@ -62,8 +62,6 @@ function validate_placement(ships, guess_map, ship_name, location, orientation, 
   let ship = ships[ship_name];
   let grid = conn_wrapper.grid;
 
-  console.log("ship_name", ship_name);
-
   let positions = [];
   starting_position = guess_map[location];
   positions.push(starting_position);

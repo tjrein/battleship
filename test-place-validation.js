@@ -1,18 +1,18 @@
 let command = "PLACE";
-let params = ['destroyer', 'd2', 'v'];
+let params = ['destroyer', 'b2', 'v'];
 
 let [ship_name, location, orientation] = params;
 
 
 const ships =  {
-  'destroyer': {size: 3, id: 5}
+  'destroyer': {size: 2, id: 5}
 }
 
 
 const grid = [
                [0, 0, 0, 0],
-               [0, 0, 0, 0],
-               [0, 0, 0, 0],
+               [0, 0, 0, 5],
+               [0, 0, 0, 5],
                [0, 0, 0, 0]
              ]
 
@@ -58,8 +58,15 @@ for (i=0; i < ship.size - 1; i++) {
   positions.push(new_entry);
 }
 
+for (row of grid) {
+  let ind = row.indexOf(ship.id);
+  if (ind > -1) {
+    row[ind] = 0;
+  }
+}
+
 for (position of positions) {
   grid[position[0]][position[1]] = ship.id;
 }
 
-console.log(grid);
+console.log("grid", grid)
