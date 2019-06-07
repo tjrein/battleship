@@ -1,6 +1,21 @@
+/*
+---------------------------------------------------------------------------------
+  Name: client.js
+
+  Purpose:
+    This file contains the client side implementation of the Battleship Protocol
+    It also contins functions that build the UI to interact with the procotocol and communicate with the server.
+
+  Date: 06/07/2019
+
+  Author: Tom Rein
+--------------------------------------------------------------------------------
+*/
+
+
+//TCP server
 const net = require('net');
 const EventEmitter = require('events');
-const commands = ['OK', 'ERR', 'OPP', 'BEGIN', 'REINIT', 'HIT', 'MISS', 'SUNK', 'WINNER'];
 
 //Instantiate emiiter to send and recive events to/from server
 class BattleshipEmitter extends EventEmitter {}
@@ -10,7 +25,7 @@ const b_emit = new BattleshipEmitter();
 let version = 1.0;
 
 //load external files
-const {grid_shape, ships_by_id, ships, guess_map} = require("./server-config.json");
+const {grid_shape, ships_by_id, ships, guess_map} = require("./server-config.json"); //NOTE: comments are not allowed in JSON files
 const {clone_grid, render_grid} = require('./server_helpers.js');
 const {validate_message_with_state} = require('./state.js');
 
@@ -23,10 +38,9 @@ let current_message_component = 'command';
 let own_grid = clone_grid(grid_shape);
 let opp_grid = clone_grid(grid_shape);
 
-/*
-CLIENT
-Process host/ip address passed from client on command line
-*/
+
+//CLIENT
+//Process host address passed from client on command line
 let host = 'localhost'; //default to localhost
 const args = process.argv.slice(2);
 if (args.length) {
@@ -61,7 +75,207 @@ const state_map = {
   'rematch': ['REINIT', 'OK', 'ERR', 'OPP']
 }
 
-//UI STATEFUL
+//attaches listener to socket after making connection with the server
+socket.on('connect', () => {
+  current_state = 'negotiate_version';
+
+  //send CONNECT message for version negotiation
+  socket.write('CONNECT ' + version + "\n");
+
+  //rattach listener to socket to recieve data from the server
+  socket.on('data', data => {
+    let messages = data.toString('UTF8').trim().split('\n');
+
+    //STATEFUL
+    //Validates messages from the server in accordance with current_state
+    for (let i = 0; i < messages.length; i++) {
+      let valid_message = validate_message_with_state(messages[i], current_state, state_map);
+      if (valid_message) {
+        let [command, params] = valid_message;
+        //STATEFUL
+        //emit the command as an evernt, which triggeres the various listeners below.
+        b_emit.emit(command, params);
+      } else {
+        console.log("STATE ERROR", current_state);
+      }
+    }
+  });
+
+  socket.on('close', data => {
+    process.exit(-1);
+  })
+});
+
+//STATEFUL
+//listens for events from b_emit.emit(command, params)
+//These functions listen for  a spsecific command and execute the appropriate callback function.
+// All listeners follow the same general format, but the functions perform different actions depending on the command.
+//This listenters primarily updates the client state where applicable and prompts for additonal input depending on state.
+//All b_smit listeners should be considered for STATEFUL requirement
+b_emit.on('OK', function(params) {
+  let successful_command = params[0];
+  if (successful_command === 'CONNECT') {
+    version = params[1];
+    current_state = 'auth_user';
+  }
+
+  if (successful_command === 'USER') {
+    current_state = 'auth_password';
+    username = params[1];
+  }
+
+  if (successful_command === 'PASSWORD') {
+    current_state = 'connected';
+  }
+
+  if (successful_command === 'CREATE') {
+    current_state = 'waiting';
+    game_name = params[1];
+  }
+
+  if (successful_command === 'GQUIT') {
+    current_state = "connected";
+
+    //reset the grids for the client
+    own_grid = clone_grid(grid_shape);
+    opp_grid = clone_grid(grid_shape);
+  }
+
+  if (successful_command === 'JOIN') {
+    current_state = 'init_game';
+    game_name = params[1];
+  }
+
+  if (successful_command === 'PLACE') {
+    console.log("\nSuccesfully placed Ship!");
+    let ship_name = params[1];
+    let positions = params[2].split(' ');
+    let ship = ships[ship_name];
+
+    //HAndle re-placement of ship.
+    //For example, if someone wants move a piece they alreayd played.
+    //Looks for all
+    for (row of own_grid) {
+      let ind = row.indexOf(ship.id);
+      if (ind > -1) {
+        row[ind] = 0;
+      }
+    }
+
+    //Place ships according to positions,
+    for (position of positions) {
+      let position_inds = guess_map[position];
+      let [y, x] = position_inds;
+      own_grid[y][x] = ship.id;
+    }
+  }
+
+  if (successful_command === 'CONFIRM') {
+    current_state = 'confirm';
+  }
+
+  if (successful_command === 'REMATCH') {
+    current_state = 'rematch';
+  }
+  prompt(current_state, params);
+});
+
+b_emit.on('ERR', params => {
+  let failed_command = params[0];
+  let reason = params[1];
+  console.log("\n" + reason); //output reason for error
+  prompt(current_state); //reset the prompt
+});
+
+b_emit.on('OPP', params => {
+  let opponent_command = params[0]
+  let opp = params[1];
+
+  if (opponent_command === 'JOIN') {
+    console.log("\n");
+    console.log(opp + ' has joined the game!');
+    current_state = 'init_game';
+    prompt(current_state);
+  }
+
+  if (opponent_command === 'GQUIT') {
+    console.log("\n");
+    console.log(opp + ' has left the game!');
+    current_state = 'waiting';
+    own_grid = clone_grid(grid_shape);
+    opp_grid = clone_grid(grid_shape);
+    prompt(current_state);
+  }
+
+  if (opponent_command === 'PLACE') {
+    inline_prompt(opp + ' placed a ship\n'); //notify client without reseting prompt
+  }
+
+  if (opponent_command === 'CONFIRM') {
+    inline_prompt(opp + ' confirmed ships, and is ready to play!'); //notidy client without reseting prompt
+  }
+
+  //update player turn on hit, miss or sunck
+  if (['HIT', 'MISS', 'SUNK'].includes(opponent_command)) {
+    current_turn = opp;
+    prompt(current_state);
+  }
+});
+
+b_emit.on('WINNER', (params) => {
+  let player = params[0];
+  console.log("\n" + player + " won the game!");
+  current_state = 'finish_game';
+  prompt(current_state);
+});
+
+b_emit.on('SUNK', (params) => {
+  let ship = params[0];
+  let location = params[1];
+  let opponent = params[1];
+  console.log("\nYou sunk the " + ship + "!");
+  prompt(current_state);
+})
+
+b_emit.on('HIT', (params) => {
+  let location = params[0];
+  let opponent = params[1];
+  let [y, x] = guess_map[location];
+  opp_grid[y][x] = 'x'; //update grid at location with x
+  current_turn = opponent;
+
+  console.log("\nHit " + location + "!");
+  prompt(current_state);
+});
+
+b_emit.on('MISS', (params) => {
+  let location = params[0];
+  let opponent = params[1];
+  let [y, x] = guess_map[location];
+  opp_grid[y][x] = 'o'; //update grid at location with o
+  current_turn = opponent;
+
+  console.log("\nMiss " + location + "!");
+  prompt(current_state);
+});
+
+b_emit.on('REINIT', () => {
+  current_state = 'init_game';
+
+  //reset grids
+  own_grid = clone_grid(grid_shape);
+  opp_grid = clone_grid(grid_shape);
+  prompt(current_state);
+});
+
+b_emit.on('BEGIN', (params) => {
+  current_turn = params[0];
+  current_state = 'play_game';
+  prompt(current_state);
+});
+
+
+//UI
 //this object keeps track of what inputs can be entered by the client in a particular state
 //helps map user inputs to appropriate commands and parameters where applicable
 const inputs_for_state = {
@@ -233,188 +447,3 @@ function inline_prompt(msg) {
     readline.setPrompt('> ')
     readline.prompt(true);
 }
-
-//SOCKET CONNECTION LIISTENER
-socket.on('connect', () => {
-  current_state = 'negotiate_version';
-
-  //send CONNECT message for version negotiation
-  socket.write('CONNECT ' + version + "\n");
-
-  //recieves data from server
-  //
-  socket.on('data', data => {
-    let messages = data.toString('UTF8').trim().split('\n');
-
-    //STATEFUL
-    for (let i = 0; i < messages.length; i++) {
-      let valid_message = validate_message_with_state(messages[i], current_state, state_map);
-      if (valid_message) {
-        let [command, params] = valid_message;
-        b_emit.emit(command, params);
-      } else {
-        console.log("STATE ERROR", current_state);
-      }
-    }
-  });
-
-  socket.on('close', data => {
-    process.exit(-1);
-  })
-});
-
-//STATEFUL
-//These functions listen for messages from the server/
-//Primarily update client state where applicable and prompt for additonal input depending on state.
-b_emit.on('OK', function(params) {
-  let successful_command = params[0];
-  if (successful_command === 'CONNECT') {
-    version = params[1];
-    current_state = 'auth_user';
-  }
-
-  if (successful_command === 'USER') {
-    current_state = 'auth_password';
-    username = params[1];
-  }
-
-  if (successful_command === 'PASSWORD') {
-    current_state = 'connected';
-  }
-
-  if (successful_command === 'CREATE') {
-    current_state = 'waiting';
-    game_name = params[1];
-  }
-
-  if (successful_command === 'GQUIT') {
-    current_state = "connected";
-    own_grid = clone_grid(grid_shape);
-    opp_grid = clone_grid(grid_shape);
-  }
-
-  if (successful_command === 'JOIN') {
-    current_state = 'init_game';
-    game_name = params[1];
-  }
-
-  if (successful_command === 'PLACE') {
-    console.log("\nSuccesfully placed Ship!");
-    let ship_name = params[1];
-    let positions = params[2].split(' ');
-    let ship = ships[ship_name];
-
-    for (row of own_grid) {
-      let ind = row.indexOf(ship.id);
-      if (ind > -1) {
-        row[ind] = 0;
-      }
-    }
-
-    for (position of positions) {
-      let position_inds = guess_map[position];
-      let [y, x] = position_inds;
-      own_grid[y][x] = ship.id;
-    }
-  }
-
-  if (successful_command === 'CONFIRM') {
-    current_state = 'confirm';
-  }
-
-  if (successful_command === 'REMATCH') {
-    current_state = 'rematch';
-  }
-  prompt(current_state, params);
-});
-
-b_emit.on('ERR', params => {
-  let failed_command = params[0];
-  let reason = params[1];
-  console.log("\n" + reason);
-  prompt(current_state);
-});
-
-b_emit.on('OPP', params => {
-  let opponent_command = params[0]
-  let opp = params[1];
-
-  if (opponent_command === 'JOIN') {
-    console.log("\n");
-    console.log(opp + ' has joined the game!');
-    current_state = 'init_game';
-    prompt(current_state);
-  }
-
-  if (opponent_command === 'GQUIT') {
-    console.log("\n");
-    console.log(opp + ' has left the game!');
-    current_state = 'waiting';
-    own_grid = clone_grid(grid_shape);
-    opp_grid = clone_grid(grid_shape);
-    prompt(current_state);
-  }
-
-  if (opponent_command === 'PLACE') {
-    inline_prompt(opp + ' placed a ship\n');
-  }
-
-  if (opponent_command === 'CONFIRM') {
-    inline_prompt(opp + ' confirmed ships, and is ready to play!');
-  }
-
-  if (['HIT', 'MISS', 'SUNK'].includes(opponent_command)) {
-    current_turn = opp;
-    prompt(current_state);
-  }
-});
-
-b_emit.on('WINNER', (params) => {
-  let player = params[0];
-  console.log("\n" + player + " won the game!");
-  current_state = 'finish_game';
-  prompt(current_state);
-});
-
-b_emit.on('SUNK', (params) => {
-  let ship = params[0];
-  let location = params[1];
-  let opponent = params[1];
-  console.log("\nYou sunk the " + ship + "!");
-  prompt(current_state);
-})
-
-b_emit.on('HIT', (params) => {
-  let location = params[0];
-  let opponent = params[1];
-  let [y, x] = guess_map[location];
-  opp_grid[y][x] = 'x';
-  current_turn = opponent;
-
-  console.log("\nHit " + location + "!");
-  prompt(current_state);
-});
-
-b_emit.on('MISS', (params) => {
-  let location = params[0];
-  let opponent = params[1];
-  let [y, x] = guess_map[location];
-  opp_grid[y][x] = 'o';
-  current_turn = opponent;
-
-  console.log("\nMiss " + location + "!");
-  prompt(current_state);
-});
-
-b_emit.on('REINIT', () => {
-  current_state = 'init_game';
-  own_grid = clone_grid(grid_shape);
-  opp_grid = clone_grid(grid_shape);
-  prompt(current_state);
-});
-
-b_emit.on('BEGIN', (params) => {
-  current_turn = params[0];
-  current_state = 'play_game';
-  prompt(current_state);
-});

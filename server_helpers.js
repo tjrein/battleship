@@ -20,13 +20,12 @@ function clone_grid(grid) {
 }
 
 
-/*
-  This function validates if a ship was sunk.
-  Ships are represented on the grid by their id.
-  For example, a destroyer has an id of 5 and a size of 2, so there would be two 5's on the grid.
-  As ships are hit, the numbers are replaced by x's.
-  So, once there are no more corresponding id's on the grid, the ship is considered sunk.
-*/
+
+//This function validates if a ship was sunk.
+//Ships are represented on the grid by their id.
+//For example, a destroyer has an id of 5 and a size of 2, so there would be two 5's on the grid.
+//As ships are hit, the numbers are replaced by x's.
+//So, once there are no more corresponding id's on the grid, the ship is considered sunk.
 function validate_sunk(id, grid) {
   //itereate through each row of the grid, if the id is found, return false, i.e. not sunk.
   for (let i=0; i < grid.length; i++) {
@@ -38,13 +37,12 @@ function validate_sunk(id, grid) {
 }
 
 
-/*
-  This function validates the Battleship win condition, i.e., all ships are sunk.
-  The grid initialized to be all 0's.
-  This function iterates through every row of the grid, and checks that every grid location is either a 0 or and x.
-  A 0 indicates an empty position, and an 'x' indicates a hit position.
-  Therefore, if every location is 0 or an 'x', it means placed ships have been sunk and the game is over.
-*/
+
+//This function validates the Battleship win condition, i.e., all ships are sunk.
+//The grid initialized to be all 0's.
+//This function iterates through every row of the grid, and checks that every grid location is either a 0 or and x.
+//A 0 indicates an empty position, and an 'x' indicates a hit position.
+//Therefore, if every location is 0 or an 'x', it means placed ships have been sunk and the game is over.
 function validate_win(grid) {
   for (let i = 0; i < grid.length; i++) {
     let row = grid[i];
@@ -58,6 +56,10 @@ function validate_win(grid) {
   return true;
 }
 
+//Validates ship Placement
+//Makes sure ship is valid with respect to configuration
+//Makes sure grid_positions are valid and in play.
+//Makes sure orientaiton is either v or h.
 function validate_placement(ships, guess_map, ship_name, location, orientation, conn_wrapper) {
   let ship = ships[ship_name];
   let grid = conn_wrapper.grid;
@@ -81,6 +83,7 @@ function validate_placement(ships, guess_map, ship_name, location, orientation, 
     return false;
   }
 
+  //From the starting position, append
   for (i=0; i < ship.size - 1; i++) {
     let last_entry = positions[positions.length - 1];
     let new_entry = [];
@@ -94,26 +97,29 @@ function validate_placement(ships, guess_map, ship_name, location, orientation, 
 
     let [y, x] = new_entry
 
+    //out of bounds
     if (grid[y][x] === undefined) {
       return false;
     }
     positions.push(new_entry);
   }
 
+  //IF the loop terminates, contains an positions to be placed on the grid.
   return positions;
 }
 
 
-/*
-  This function helps convert positions represented by indices back into human readable grid locations.
-  It selects all the keys of guess map, e.g. b3, and selects the key that corresponds to a given array position.
-  Because JavaScript treats arrays as separate objects, you cannot compare eqaulity directly.
-  To get around this, the arrays are joined as strings so they can be compared.
-*/
+//This function helps convert positions represented by indices back into human readable grid locations.
+//It selects all the keys of guess map, e.g. b3, and selects the key that corresponds to a given array position.
+//Because JavaScript treats arrays as separate objects, you cannot compare eqaulity directly.
+//To get around this, the arrays are joined as strings so they can be compared.
 function convert_position(guess_map, position) {
   return Object.keys(guess_map).find(key => guess_map[key].join() === position.join());
 }
 
+
+//Renders grid for client
+//displays each row of the grid, make a string for better looking formttting.
 function render_grid(grid) {
   for (row of grid) {
     console.log(row.join(' '));
