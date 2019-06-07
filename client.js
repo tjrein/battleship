@@ -5,7 +5,7 @@ const commands = ['OK', 'ERR', 'OPP', 'BEGIN', 'REINIT', 'HIT', 'MISS', 'SUNK', 
 let version = 1.0;
 let message = '';
 let game_name = '';
-let useranem = '';
+let current_turn = '';
 let current_message_component = 'command';
 let current_state = 'disconnected';
 
@@ -242,6 +242,7 @@ function prompt(current_state) {
 
   if (current_state === 'play_game') {
     console.log('In Game: ' + game_name +"\n");
+    console.log("Current turn: " + current_turn);
     render_grid(opp_grid);
   }
 
@@ -379,6 +380,11 @@ b_emit.on('OPP', params => {
     console_out(opp + ' confirmed ships, and is ready to play!');
   }
 
+  if (['HIT', 'MISS', 'SUNK'].includes(opponent_command)) {
+    current_turn = opp;
+    prompt(current_state);
+  }
+
 });
 
 b_emit.on('WINNER', (params) => {
@@ -391,14 +397,17 @@ b_emit.on('WINNER', (params) => {
 b_emit.on('SUNK', (params) => {
   let ship = params[0];
   let location = params[1];
+  let opponent = params[1];
   console.log("\nYou sunk the " + ship + "!");
   prompt(current_state);
 })
 
 b_emit.on('HIT', (params) => {
   let location = params[0];
+  let opponent = params[1];
   let [y, x] = guess_map[location];
   opp_grid[y][x] = 'x';
+  current_turn = opponent;
 
   console.log("\nHit " + location + "!");
   prompt(current_state);
@@ -406,8 +415,10 @@ b_emit.on('HIT', (params) => {
 
 b_emit.on('MISS', (params) => {
   let location = params[0];
+  let opponent = params[1];
   let [y, x] = guess_map[location];
   opp_grid[y][x] = 'o';
+  current_turn = opponent;
 
   console.log("\nMiss " + location + "!");
   prompt(current_state);
@@ -415,10 +426,13 @@ b_emit.on('MISS', (params) => {
 
 b_emit.on('REINIT', () => {
   current_state = 'init_game';
+  own_grid = clone_grid(grid_shape);
+  opp_grid = clone_grid(grid_shape);
   prompt(current_state);
 });
 
-b_emit.on('BEGIN', () => {
+b_emit.on('BEGIN', (params) => {
+  current_turn = params[0];
   current_state = 'play_game';
   prompt(current_state);
 });

@@ -255,6 +255,7 @@ b_emit.on('CONFIRM', function(params, conn_wrapper) {
       let rand_ind = Math.round(Math.random());
       let goes_first = instance.wrappers[rand_ind].username;
 
+      instance.turn = goes_first;
 
       instance.wrappers.forEach(function (wrapper) {
         wrapper.state = 'play_game';
@@ -330,7 +331,7 @@ b_emit.on('REMATCH', (params, conn_wrapper) => {
     }
 
     if (rematch_count === 2) {
-      instance.forEach(function (wrapper) {
+      instance.wrappers.forEach(function (wrapper) {
         wrapper.grid = clone_grid(grid_shape);
         wrapper.state = 'init_game';
         wrapper.socket.write("REINIT");
@@ -345,9 +346,25 @@ b_emit.on('GUESS', (params, conn_wrapper) => {
   let instance = game_instances[conn_wrapper.game];
   let location = params[0];
   let player = conn_wrapper;
+
+  let current_turn = instance.turn;
+
+  console.log("current_turn", current_turn);
+  console.log("socket username", conn_wrapper.username);
+
+  if (current_turn !== conn_wrapper.username) {
+    return conn_wrapper.socket.write("ERR GUESS :It is not your turn");
+  }
+
   let opponent = instance.wrappers.filter(wrapper => wrapper !== conn_wrapper)[0];
 
-  let [y, x] = guess_map[location];
+  let guess_position = guess_map[location];
+
+  if (!guess_position) {
+    return conn_wrapper.socket.write("ERR GUESS :Not a valid grid position");
+  }
+
+  let [y, x] = guess_position;
 
   if (opponent.grid[y][x]) {
     let ship_id = opponent.grid[y][x];
@@ -364,15 +381,21 @@ b_emit.on('GUESS', (params, conn_wrapper) => {
         player.state = 'finish_game';
         opponent.state = 'finish_game';
       } else {
-        player.socket.write("SUNK " + ships_by_id[ship_id] + ' ' + location + '\n');
+        player.socket.write("SUNK " + ships_by_id[ship_id] + ' ' + location + ' ' + opponent.username + '\n');
+        opponent.socket.write("OPP SUNK " + opponent.username + "\n");
+        instance.turn = opponent.username;
       }
 
     } else {
-      player.socket.write("HIT " + location + "\n");
+      player.socket.write("HIT " + location + ' ' + opponent.username + "\n");
+      opponent.socket.write("OPP HIT " + opponent.username + "\n");
+      instance.turn = opponent.username;
     }
 
   } else {
-    player.socket.write("MISS " + location + "\n");
+    player.socket.write("MISS " + location + ' ' + opponent.username + "\n");
+    opponent.socket.write("OPP MISS " + opponent.username + "\n");
+    instance.turn = opponent.username;
   }
 });
 
