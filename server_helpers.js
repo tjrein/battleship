@@ -108,11 +108,18 @@ function validate_placement(ships, guess_map, ship_name, location, orientation, 
   This function helps convert positions represented by indices back into human readable grid locations.
   It selects all the keys of guess map, e.g. b3, and selects the key that corresponds to a given array position.
   Because JavaScript treats arrays as separate objects, you cannot compare eqaulity directly.
-  To get around this, the arrays are joined as strings so they can be compared. 
+  To get around this, the arrays are joined as strings so they can be compared.
 */
 function convert_position(guess_map, position) {
   return Object.keys(guess_map).find(key => guess_map[key].join() === position.join());
 }
+
+function render_grid(grid) {
+  for (row of grid) {
+    console.log(row.join(' '));
+  }
+}
+
 
 //Export the functions so they can be imported by other files
 module.exports.clone_grid = clone_grid;
@@ -120,3 +127,4 @@ module.exports.validate_sunk = validate_sunk;
 module.exports.validate_win = validate_win;
 module.exports.validate_placement = validate_placement;
 module.exports.convert_position = convert_position;
+module.exports.render_grid = render_grid;

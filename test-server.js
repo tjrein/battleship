@@ -10,11 +10,13 @@ const versions = [1.0];
 
 //Load battleshipt application configuration
 //This specifies the size of the grid, what ships to use, etc.
-const config = require("./server-config.json");
-const {users, grid_shape, ships_by_id, ships, guess_map} = config;
+const {users, grid_shape, ships_by_id, ships, guess_map} = require("./server-config.json");
 
 //load helper functions that help play battleship
 const {clone_grid, validate_sunk, validate_win, validate_placement, convert_position} = require("./server_helpers.js");
+
+//Load state validation
+const {validate_message_with_state} = require('./state.js');
 
 
 //Contains all valid commands for a given state.
@@ -32,46 +34,11 @@ const state_map = {
   "finish_game": ["REMATCH", "GQUIT", "QUIT"]
 }
 
-//given a connection, which has a state. make sure command is allowable in state using the state map.
-//returns true or false if the command can be executed.
-function validate_state(conn_wrapper, command) {
-  let current_state = conn_wrapper.state;
-  return state_map[current_state] && state_map[current_state].includes(command)
-}
-
-function parseMessage(message) {
-  let components;
-
-  //process escpaed whitespace, otherwise split message on space.
-  if (message.includes(':')) {
-    let ind = message.indexOf(':');
-    let esc_param = message.slice(ind + 1, message.length);
-    let upto_esc = message.slice(0, ind - 1);
-    components = upto_esc.split(" ");
-    components.push(esc_param);
-  } else {
-    components = message.split(" ");
-  }
-
-  command = components[0];
-  params = components.splice(1, components.length - 1);
-  return {command: command, params: params}
-}
-
-function executeCommand(command, parameters, conn_wrapper) {
-  if (commands.includes(command)) {
-    b_emit.emit(command, parameters, conn_wrapper)
-  } else {
-    console.log("COMMAND NOT FOUND");
-    conn_wrapper.socket.write("ERR " + command + " :" + command + " is not a valid command");
-  }
-}
-
-const commands = ['CONNECT', 'QUIT', 'CREATE', 'JOIN', 'PLACE', 'GQUIT', 'CONFIRM', 'REMATCH', "WINNER", "GUESS", "USER", "PASSWORD"];
-const states = ['negotiate_version', 'auth_user', 'auth_password', 'connected', 'waiting', 'init_game', 'confirm', 'play_game', 'finish_game', 'rematch'];
-
+//object to store game instances
 let game_instances = {}
 
+//SERVICE
+//bind server to port 7999
 server.listen(7999, function() {
   console.log('server listening to %j', server.address());
 });
@@ -79,15 +46,15 @@ server.listen(7999, function() {
 //CONCURRENT
 //bind event listenters to sockets as they connect.
 //wraps sockets in an object with additional protocol information.
-server.on('connection', handleConnection);
-
-function handleConnection(conn) {
+server.on('connection', conn => {
   var client_address = conn.remoteAddress + ':' + conn.remotePort;
+  conn.setEncoding('utf8');
   conn.on('data', onConnData);
   conn.once('close', onConnClose);
   conn.on('error', onConnError);
   console.log("Client connected: ", client_address);
 
+  //wrap socket with useful information
   let conn_wrapper = {
     socket: conn,
     state: 'negotiate_version',
@@ -100,11 +67,13 @@ function handleConnection(conn) {
     console.log('connection data from %s: %j', client_address, data);
     let messages = data.toString('UTF8').trim().split('\n');
 
+    //STATEFUL
     for (let i = 0; i < messages.length; i++) {
-      let {command, params} = parseMessage(messages[i]);
-      let is_allowable = validate_state(conn_wrapper, command);
-      if (is_allowable) {
-        executeCommand(command, params, conn_wrapper)
+      //let {command, params} = parseMessage(messages[i]);
+      let valid_message = validate_message_with_state(messages[i], conn_wrapper.state, state_map);
+      if (valid_message) {
+        let [command, params] = valid_message;
+        b_emit.emit(command, params, conn_wrapper);
       } else {
         conn_wrapper.socket.write("ERR " + command + " :Current state is not supported for this command")
       }
@@ -118,7 +87,7 @@ function handleConnection(conn) {
   function onConnError(err) {
     console.log('Connection %s error: %s', client_address, err.message);
   }
-}
+});
 
 function cleanupInstance(instance_name) {
   //If no clients are in an instance, delete it
@@ -134,6 +103,9 @@ b_emit.on('USER', (params, conn_wrapper) => {
     conn_wrapper.username = username;
     conn_wrapper.state = 'auth_password';
     conn_wrapper.socket.write('OK USER ' + username);
+  } else {
+    console.log("Not a valid username");
+    conn_wrapper.socket.write('ERR USER :Not a registered user');
   }
 });
 
@@ -145,7 +117,7 @@ b_emit.on('PASSWORD', (params, conn_wrapper) => {
     conn_wrapper.socket.write('OK PASSWORD');
     conn_wrapper.state = 'connected';
   } else {
-    conn_wrapper.socket.write('ERR PASSWORD');
+    conn_wrapper.socket.write('ERR PASSWORD :Incorrect password');
   }
 });
 
@@ -270,15 +242,13 @@ b_emit.on('CONFIRM', function(params, conn_wrapper) {
 });
 
 b_emit.on('JOIN', function(params, conn_wrapper) {
-  console.log("Server: JOIN");
-
   if (params.length > 1) {
     //TODO SEND ERROR
     let reason = ":Too many parameters";
     return conn_wrapper.socket.write("ERR JOIN " + reason + "\n");
   }
 
-  name = params[0]
+  let name = params[0]
 
   if (game_instances[name]) {
     conn_wrapper.socket.write("OK JOIN " + ':'.concat(name) + '\n');
@@ -325,7 +295,7 @@ b_emit.on('REMATCH', (params, conn_wrapper) => {
           let opponent = conn_wrapper.username;
           wrapper.socket.write("OPP REMATCH " + username + "\n");
         } else {
-          conn_wrapper.socket.write("OK REMATCH")
+          conn_wrapper.socket.write("OK REMATCH\n")
         }
       });
     }
@@ -334,7 +304,7 @@ b_emit.on('REMATCH', (params, conn_wrapper) => {
       instance.wrappers.forEach(function (wrapper) {
         wrapper.grid = clone_grid(grid_shape);
         wrapper.state = 'init_game';
-        wrapper.socket.write("REINIT");
+        wrapper.socket.write("REINIT\n");
       });
     }
   } else {
@@ -346,11 +316,7 @@ b_emit.on('GUESS', (params, conn_wrapper) => {
   let instance = game_instances[conn_wrapper.game];
   let location = params[0];
   let player = conn_wrapper;
-
   let current_turn = instance.turn;
-
-  console.log("current_turn", current_turn);
-  console.log("socket username", conn_wrapper.username);
 
   if (current_turn !== conn_wrapper.username) {
     return conn_wrapper.socket.write("ERR GUESS :It is not your turn");
@@ -400,13 +366,12 @@ b_emit.on('GUESS', (params, conn_wrapper) => {
 });
 
 b_emit.on('CREATE', function(params, conn_wrapper) {
-  console.log("Server: Create");
   if (params.length > 1) {
-    console.log("Too many parameters");
+    console.log("ERR CREATE :Too many parameters");
     return conn_wrapper.socket.write('ERR CREATE :Too many parameters\n')
   }
 
-  name = params[0];
+  let name = params[0];
 
   if (game_instances[name]) {
     let reason = "Game: \'" + name + "\' already exists";
@@ -420,5 +385,6 @@ b_emit.on('CREATE', function(params, conn_wrapper) {
 });
 
 b_emit.on('QUIT', function(params, conn_wrapper) {
-  conn_wrapper.socket.destroy()
+  conn_wrapper.socket.destroy
+  conn_wrapper = null; //will be garbage collected
 });

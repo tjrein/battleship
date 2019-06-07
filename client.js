@@ -2,24 +2,26 @@ const net = require('net');
 const EventEmitter = require('events');
 const commands = ['OK', 'ERR', 'OPP', 'BEGIN', 'REINIT', 'HIT', 'MISS', 'SUNK', 'WINNER'];
 
-let version = 1.0;
-let message = '';
-let game_name = '';
-let current_turn = '';
-let current_message_component = 'command';
-let current_state = 'disconnected';
-
-//TODO RESET GRID
-
-const config = require("./server-config.json");
-const {grid_shape, ships_by_id, ships, guess_map} = config;
-const {clone_grid} = require('./server_helpers.js');
-
-let own_grid = clone_grid(grid_shape);
-let opp_grid = clone_grid(grid_shape);
-
+//Instantiate emiiter to send and recive events to/from server
 class BattleshipEmitter extends EventEmitter {}
 const b_emit = new BattleshipEmitter();
+
+//desired version, can be changed depending on what version server decides
+let version = 1.0;
+
+//load external files
+const {grid_shape, ships_by_id, ships, guess_map} = require("./server-config.json");
+const {clone_grid, render_grid} = require('./server_helpers.js');
+const {validate_message_with_state} = require('./state.js');
+
+//declare client application variables
+let game_name = '';
+let current_turn = '';
+let current_state = 'disconnected';
+let message = '';
+let current_message_component = 'command';
+let own_grid = clone_grid(grid_shape);
+let opp_grid = clone_grid(grid_shape);
 
 /*
 CLIENT
@@ -40,7 +42,12 @@ if (args.length) {
 //client defaults to port number
 const socket = net.createConnection({ port: 7999, host: host });
 
+//use UTF8 per design specification
+socket.setEncoding('utf8');
+
 //STATEFUL
+//This is passed to the validate_message_with_state function
+//Maps what commands can be executed for a given state
 const state_map = {
   'negotiate_version': ['OK', 'ERR'],
   'auth_user': ['OK', 'ERR'],
@@ -54,64 +61,27 @@ const state_map = {
   'rematch': ['REINIT', 'OK', 'ERR', 'OPP']
 }
 
-function render_grid(grid) {
-  for (row of grid) {
-    console.log(row.join(' '));
-  }
-}
-
-//STATEFUL
-function validate_state(current_state, command) {
-  return state_map[current_state] && state_map[current_state].includes(command)
-}
-
-function executeCommand(command, parameters) {
-  if (commands.includes(command)) {
-    b_emit.emit(command, parameters)
-  } else {
-    console.log("COMMAND NOT FOUND");
-  }
-}
-
-function parseMessage(message) {
-  let components;
-
-  //process escpaed whitespace
-  if (message.includes(':')) {
-    let ind = message.indexOf(':');
-    let esc_param = message.slice(ind + 1, message.length);
-    let upto_esc = message.slice(0, ind - 1);
-    components = upto_esc.split(" ");
-    components.push(esc_param);
-  } else {
-    components = message.split(" ");
-  }
-
-  let command = components[0]
-  let params = components.splice(1, components.length - 1)
-  return {command: command, params: params}
-}
-
+//UI STATEFUL
 //this object keeps track of what inputs can be entered by the client in a particular state
 //helps map user inputs to appropriate commands and parameters where applicable
 const inputs_for_state = {
   'auth_user': {
-    '1': {'command': 'USER', 'parameters': ['username']},
+    '1': {'command': 'USER', 'parameters': ['Username']},
     '2': {'command': 'QUIT', 'parameters': []}
   },
   'auth_password': {
-    '1': {'command': 'PASSWORD', 'parameters': ['password']},
+    '1': {'command': 'PASSWORD', 'parameters': ['Password']},
     '2': {'command': 'QUIT', 'parameters': []}
   },
   'connected': {
-    '1': {'command': 'CREATE', 'parameters': ['name']},
-    '2': {'command': 'JOIN', 'parameters': ['name']},
+    '1': {'command': 'CREATE', 'parameters': ['Name']},
+    '2': {'command': 'JOIN', 'parameters': ['Name']},
   },
   'waiting': {
     '1': {'command': 'GQUIT', 'parameters': [] }
   },
   'init_game': {
-    '1': {'command': 'PLACE', 'parameters': ['ship', 'grid location', 'orientation']},
+    '1': {'command': 'PLACE', 'parameters': ['Ship', 'Grid Location', 'Orientation (v or h)']},
     '2': {'command': 'CONFIRM', 'parameters': []},
     '3': {'command': 'GQUIT', 'parameters': []}
   },
@@ -119,7 +89,7 @@ const inputs_for_state = {
     '1': {'command': 'GQUIT', 'parameters': [] }
   },
   'play_game': {
-    '1': {'command': 'GUESS', 'parameters': ['grid location'] },
+    '1': {'command': 'GUESS', 'parameters': ['Grid location'] },
     '2': {'command': 'GQUIT', 'parameters': [] }
   },
   'finish_game': {
@@ -131,15 +101,9 @@ const inputs_for_state = {
   }
 }
 
-function console_out(msg) {
-    process.stdout.clearLine();
-    process.stdout.cursorTo(0);
-    console.log(msg);
-    readline.setPrompt('> ')
-    readline.prompt(true);
-}
-
+//UI
 //helper function for console output to help client navigate protocol
+//called by prompt
 function prompt_string(current_state) {
   test = '\nAvailable Options (enter number to execute)\n';
 
@@ -159,6 +123,7 @@ function prompt_string(current_state) {
   return test + options
 }
 
+//UI
 //initialize CLI
 const readline = require('readline').createInterface({
   input: process.stdin,
@@ -166,19 +131,10 @@ const readline = require('readline').createInterface({
   prompt: '>'
 });
 
-function parameter_prompt(parameters) {
-  param_string = parameters.join(', ')
-  readline.setPrompt('\nEnter the following parameters (space separated): ' + param_string + '\n\n> ');
-  readline.prompt();
-
-  //Somewhat hacky. Node is async, and this ensures proper execution order for message construction.
-  setTimeout(() => {
-    current_message_component = 'parameters';
-  }, 0)
-}
-
+//UI
 //Listens for user input on newlines.
 //Formats user input into valid protocol messages
+//processes both commands and parameters separately.
 readline.on('line', input => {
   if (current_message_component === 'command') {
     valid_inputs = inputs_for_state[current_state];
@@ -202,7 +158,6 @@ readline.on('line', input => {
        prompt(current_state);
      }
   }
-
   if (current_message_component === 'parameters') {
     //escape space characters for JOIN and CREATE so clients can create games with multiple words
     //Message at this point will be just the command
@@ -220,9 +175,10 @@ readline.on('line', input => {
   }
 });
 
+//UI
+//displays the prompt for the user
+//depending on state, may display additonal information
 function prompt(current_state) {
-  let message = '';
-
   console.log("\n==========BATTLESHIP PROTOCOL========");
 
   if (current_state === 'waiting') {
@@ -236,7 +192,8 @@ function prompt(current_state) {
   }
 
   if (current_state === 'init_game') {
-    console.log('In Game: ' + game_name +"\n");
+    console.log('In Game: ' + game_name);
+    console.log("Placeable Ships:", Object.keys(ships).join(", ") + "\n");
     render_grid(own_grid);
   }
 
@@ -251,6 +208,31 @@ function prompt(current_state) {
   readline.prompt(true);
 }
 
+//UI
+//This function prompts for a user to enter a string of parameters
+//Assumes the user will enter parameters separated by spaces
+function parameter_prompt(parameters) {
+  param_string = parameters.join(', ')
+  readline.setPrompt('\nEnter the following parameters (space separated): ' + param_string + '\n\n> ');
+  readline.prompt();
+
+  //Somewhat hacky. Node is async, and this ensures proper execution order for message construction.
+  setTimeout(() => {
+    current_message_component = 'parameters';
+  }, 0)
+}
+
+//UI
+//This function is used to send messages without reseting the current prompt screen
+//This is primarily used to listen for OPP events.
+//The user is notified of the opponent's action, but it does not reset the prompt
+function inline_prompt(msg) {
+    process.stdout.clearLine();
+    process.stdout.cursorTo(0);
+    console.log(msg);
+    readline.setPrompt('> ')
+    readline.prompt(true);
+}
 
 //SOCKET CONNECTION LIISTENER
 socket.on('connect', () => {
@@ -259,14 +241,17 @@ socket.on('connect', () => {
   //send CONNECT message for version negotiation
   socket.write('CONNECT ' + version + "\n");
 
+  //recieves data from server
+  //
   socket.on('data', data => {
     let messages = data.toString('UTF8').trim().split('\n');
 
+    //STATEFUL
     for (let i = 0; i < messages.length; i++) {
-      let {command, params} = parseMessage(messages[i]);
-      let is_allowable = validate_state(current_state, command);
-      if (is_allowable) {
-        executeCommand(command, params);
+      let valid_message = validate_message_with_state(messages[i], current_state, state_map);
+      if (valid_message) {
+        let [command, params] = valid_message;
+        b_emit.emit(command, params);
       } else {
         console.log("STATE ERROR", current_state);
       }
@@ -278,11 +263,9 @@ socket.on('connect', () => {
   })
 });
 
-//BEGIN PROTOCOL SPECIFIC LISTENERS
-/*
-  These functions listen for messages from the server
-  Primarily Update client state and prompt for additonal input depending on state.
-*/
+//STATEFUL
+//These functions listen for messages from the server/
+//Primarily update client state where applicable and prompt for additonal input depending on state.
 b_emit.on('OK', function(params) {
   let successful_command = params[0];
   if (successful_command === 'CONNECT') {
@@ -373,18 +356,17 @@ b_emit.on('OPP', params => {
   }
 
   if (opponent_command === 'PLACE') {
-    console_out(opp + ' placed a ship\n');
+    inline_prompt(opp + ' placed a ship\n');
   }
 
   if (opponent_command === 'CONFIRM') {
-    console_out(opp + ' confirmed ships, and is ready to play!');
+    inline_prompt(opp + ' confirmed ships, and is ready to play!');
   }
 
   if (['HIT', 'MISS', 'SUNK'].includes(opponent_command)) {
     current_turn = opp;
     prompt(current_state);
   }
-
 });
 
 b_emit.on('WINNER', (params) => {
@@ -436,5 +418,3 @@ b_emit.on('BEGIN', (params) => {
   current_state = 'play_game';
   prompt(current_state);
 });
-
-//END EVENT LISTENERS
