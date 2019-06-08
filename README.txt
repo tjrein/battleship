@@ -2,7 +2,6 @@
   Author: Tom Rein
   Email: tr557@drexel.edu
 
-
 ====Dependencies====
   Node v8.10.0
 
@@ -36,10 +35,8 @@
 
   *Operating Systems*
     It is advisable that this be run on Linux.
-    I was able to run the code locally on tux just fine.
-    Tux also has Node v8.10.0 installed.
-    Specifying an ipaddress for the client was refused, but I think it is because of my permissions perhaps.
-    On my local computer, I was able to pass an ipaddress to the client and it connected successfully.
+    I was able to run the protocol on Tux by specifying the ipaddress that the server was running on.
+    Tux has Node v8.10.0 installed
 
 
 =====Protocol Analysis====
