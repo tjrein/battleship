@@ -26,7 +26,7 @@
     The default configuration has a 3x3 grid and one ship that can be placed.
     The grid size can be modified, provided you enter appropriate grid positions in the guess_map.
     Additional ships can also be added, and require entries in "ships" and "ships_by_id"
-    This file does not have any comments since it is a JSON file. Comments are not allowed.
+    This file does not have any comments since it is a JSON file, and Comments are not allowed.
 
   *Interface*
     The protocol interface responds to numerical inputs that correspond to commands.
