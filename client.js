@@ -13,11 +13,11 @@
 */
 
 
-//TCP server
+//Used to establish TCP connections
 const net = require('net');
-const EventEmitter = require('events');
 
-//Instantiate emiiter to send and recive events to/from server
+//Instantiate emiiter to emit events based around server commands.
+const EventEmitter = require('events');
 class BattleshipEmitter extends EventEmitter {}
 const b_emit = new BattleshipEmitter();
 
@@ -25,8 +25,12 @@ const b_emit = new BattleshipEmitter();
 let version = 1.0;
 
 //load external files
-const {grid_shape, ships_by_id, ships, guess_map} = require("./server-config.json"); //NOTE: comments are not allowed in JSON files
-const {clone_grid, render_grid} = require('./server_helpers.js');
+const {grid_shape, ships_by_id, ships, guess_map} = require("./config.json"); //NOTE: comments are not allowed in JSON files
+
+//load helper functions related to grids
+const {clone_grid, render_grid} = require('./helpers.js');
+
+//STATEFUL load state validation logic
 const {validate_message_with_state} = require('./state.js');
 
 //declare client application variables
@@ -54,6 +58,7 @@ if (args.length) {
 
 //SERVICE
 //client defaults to port number
+//connects to server listening on port 7999 at host
 const socket = net.createConnection({ port: 7999, host: host });
 
 //use UTF8 per design specification
@@ -84,6 +89,8 @@ socket.on('connect', () => {
 
   //rattach listener to socket to recieve data from the server
   socket.on('data', data => {
+    //split messages on newline.
+    //this will generally by one message, but handle multiple messages
     let messages = data.toString('UTF8').trim().split('\n');
 
     //STATEFUL
@@ -290,6 +297,7 @@ const inputs_for_state = {
   'connected': {
     '1': {'command': 'CREATE', 'parameters': ['Name']},
     '2': {'command': 'JOIN', 'parameters': ['Name']},
+    '3': {'command': 'QUIT', 'parameters': []}
   },
   'waiting': {
     '1': {'command': 'GQUIT', 'parameters': [] }
@@ -325,7 +333,7 @@ function prompt_string(current_state) {
   options = {
     "auth_user": "1) Enter Username\n2) Exit\n",
     "auth_password": "1) Enter Password\n2) Exit\n",
-    "connected": "1) Create Game\n2) Join Game\n",
+    "connected": "1) Create Game\n2) Join Game\n3) Exit\n",
     "waiting": "1) Leave Game\n",
     "init_game": "1) Place ship\n2) Confirm Ship Placements\n3) Leave Game\n",
     "confirm": "1) Leave Game\n",
